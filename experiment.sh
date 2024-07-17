@@ -13,8 +13,16 @@ EDGE_NODES_MEMORY_CAPACITY_GB="2"
 CLOUD_NODES_LABELS=(
     "zone=cloud"
 )
-EDGE_NODE_LABELS=(
+EDGE_NODES_LABELS=(
     "zone=edge"
+)
+
+EDGE_NODES_NETWORK_RESTRICTIONS=(
+    "rate=1mbps"
+    "delay=100ms"
+    "loss=50%"
+    "duplicate=50%"
+    "corrupt=10%"
 )
 
 TOTAL_NODES=$((CLOUD_NODES_NUM + EDGE_NODES_NUM))
@@ -49,9 +57,23 @@ usage_error() {
 
 init(){
     wget -q -O - "${K3D_INSTALL_SCRIPT}" | bash
+    
+    # Pull docker-tc container
+    docker pull lukaszlach/docker-tc
 }
 
 up(){
+
+    # Run docker-tc container
+    docker run -d \
+        --name docker-tc \
+        --network host \
+        --cap-add NET_ADMIN \
+        --restart always \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v /var/docker-tc:/var/docker-tc \
+        lukaszlach/docker-tc
+
     cloud_args=""
     edge_args=""
 
@@ -75,7 +97,7 @@ up(){
             edge_args+=","
         fi
         edge_args+="agent:$i"
-        for label in "${EDGE_NODE_LABELS[@]}"; do
+        for label in "${EDGE_NODES_LABELS[@]}"; do
             edge_labels+=("--k3s-node-label" "${label}@agent:$i")
         done
     done
@@ -97,6 +119,10 @@ up(){
         agent_index=$((CLOUD_NODES_NUM + i))
         agent_name="k3d-${CLUSTER_NAME}-agent-${agent_index}"
         docker update --cpus="${EDGE_NODES_CPU_CAPACITY}" --memory="${EDGE_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${EDGE_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
+        # Use docker-tc HTTP API to set labels for edge nodes
+        for restriction in "${EDGE_NODES_NETWORK_RESTRICTIONS[@]}"; do
+            curl -X POST "http://localhost:4080/${agent_name}" -d "${restriction}"
+        done
     done
 
     info
@@ -104,6 +130,8 @@ up(){
 
 down(){
     k3d cluster delete "${CLUSTER_NAME}"
+    docker stop docker-tc
+    docker rm docker-tc
 }
 
 info(){
