@@ -1,6 +1,7 @@
 #!/bin/bash
 
 K3D_INSTALL_SCRIPT="https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh"
+K3D_IMAGE="ktogias/k3s:v1.30.2-k3s2-tc"
 CLUSTER_NAME="continuum"
 LOADBALANCER_PORT_MAP=8081
 CLOUD_NODES_NUM=1
@@ -29,6 +30,7 @@ TOTAL_NODES=$((CLOUD_NODES_NUM + EDGE_NODES_NUM))
 K3D_CLUSTER_CREATE_ARGS=(
     "-p" "${LOADBALANCER_PORT_MAP}:80@loadbalancer"
     "-a" "${TOTAL_NODES}"
+    "--image" "${K3D_IMAGE}"
 )
 
 CLOUD_NODES_MEMORY_CAPACITY_KB=$((CLOUD_NODES_MEMORY_CAPACITY_GB * 1024 * 1024))
@@ -56,23 +58,17 @@ usage_error() {
 }
 
 init(){
+    #Install k3d
     wget -q -O - "${K3D_INSTALL_SCRIPT}" | bash
-    
-    # Pull docker-tc container
-    docker pull lukaszlach/docker-tc
+
+    #Pull k3d image
+    docker pull ${K3D_IMAGE}
+
+    # Load sch_netem module
+    sudo modprobe sch_netem
 }
 
 up(){
-
-    # Run docker-tc container
-    docker run -d \
-        --name docker-tc \
-        --network host \
-        --cap-add NET_ADMIN \
-        --restart always \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        -v /var/docker-tc:/var/docker-tc \
-        lukaszlach/docker-tc
 
     cloud_args=""
     edge_args=""
@@ -102,6 +98,23 @@ up(){
         done
     done
 
+     # Extract the values for network restrictions
+    rate_value=""
+    delay_value=""
+    loss_value=""
+    duplicate_value=""
+    corrupt_value=""
+
+    for restriction in "${EDGE_NODES_NETWORK_RESTRICTIONS[@]}"; do
+        case $restriction in
+            rate=*) rate_value="${restriction#*=}" ;;
+            delay=*) delay_value="${restriction#*=}" ;;
+            loss=*) loss_value="${restriction#*=}" ;;
+            duplicate=*) duplicate_value="${restriction#*=}" ;;
+            corrupt=*) corrupt_value="${restriction#*=}" ;;
+        esac
+    done
+
     # Create the k3d cluster
     k3d cluster create "${CLUSTER_NAME}" "${K3D_CLUSTER_CREATE_ARGS[@]}" \
         --k3s-arg "--kubelet-arg=system-reserved=cpu=${CLOUD_SYSTEM_RESERVED_CPU},memory=${CLOUD_SYSTEM_RESERVED_MEMORY_KB}Ki@${cloud_args}" \
@@ -119,10 +132,29 @@ up(){
         agent_index=$((CLOUD_NODES_NUM + i))
         agent_name="k3d-${CLUSTER_NAME}-agent-${agent_index}"
         docker update --cpus="${EDGE_NODES_CPU_CAPACITY}" --memory="${EDGE_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${EDGE_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
-        # Use docker-tc HTTP API to set labels for edge nodes
-        for restriction in "${EDGE_NODES_NETWORK_RESTRICTIONS[@]}"; do
-            curl -X POST "http://localhost:4080/${agent_name}" -d "${restriction}"
-        done
+        # Emulate low network restrictions for edge nodes
+        # Build tc commands dynamically
+        tc_commands="tc qdisc add dev eth0 root handle 1: htb default 30 r2q 5;"
+        tc_commands+="tc class add dev eth0 parent 1: classid 1:1 htb rate 1000mbit quantum 1514;"
+        
+        if [ -n "$rate_value" ]; then
+            tc_commands+="tc class add dev eth0 parent 1:1 classid 1:30 htb rate ${rate_value} quantum 1500;"
+        fi
+
+        netem_command="tc qdisc add dev eth0 parent 1:30 handle 30: netem"
+        [ -n "$delay_value" ] && netem_command+=" delay ${delay_value}"
+        [ -n "$loss_value" ] && netem_command+=" loss ${loss_value}"
+        [ -n "$duplicate_value" ] && netem_command+=" duplicate ${duplicate_value}"
+        [ -n "$corrupt_value" ] && netem_command+=" corrupt ${corrupt_value}"
+        netem_command+=";"
+
+        tc_commands+="${netem_command}"
+
+        docker exec "${agent_name}" sh -c "
+            iptables -t mangle -A POSTROUTING -o eth0 -j MARK --set-mark 1;
+            ${tc_commands}
+            tc filter add dev eth0 protocol ip parent 1:0 prio 1 handle 1 fw flowid 1:30;
+        "
     done
 
     info
@@ -130,8 +162,6 @@ up(){
 
 down(){
     k3d cluster delete "${CLUSTER_NAME}"
-    docker stop docker-tc
-    docker rm docker-tc
 }
 
 info(){
