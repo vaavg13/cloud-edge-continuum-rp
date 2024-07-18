@@ -113,6 +113,20 @@ apply_network_restrictions() {
     "
 }
 
+wait_for_pods_ready() {
+    echo "Waiting for all pods to be in Running or Completed state..."
+    sleep 30
+    while true; do
+        not_ready_pods=$(kubectl get pods --all-namespaces --field-selector=status.phase!=Running,status.phase!=Succeeded | grep -c -v "NAME")
+        if [ "$not_ready_pods" -eq 0 ]; then
+            echo "All pods are in Running or Completed state."
+            break
+        else
+            echo "Waiting for $not_ready_pods pods to be ready..."
+            sleep 10
+        fi
+    done
+}
 
 up(){
 
@@ -167,13 +181,16 @@ up(){
         --k3s-arg "--kubelet-arg=system-reserved=cpu=${EDGE_SYSTEM_RESERVED_CPU},memory=${EDGE_SYSTEM_RESERVED_MEMORY_KB}Ki@${edge_args}" \
         "${cloud_labels[@]}" "${edge_labels[@]}"
 
-    # Set resource limits and labels for cloud nodes
+    # Wait for all pods to be in Running or Completed state
+    wait_for_pods_ready
+
+    # Set resource limits for cloud nodes containers
     for ((i=0; i<CLOUD_NODES_NUM; i++)); do
         agent_name="k3d-${CLUSTER_NAME}-agent-${i}"
         docker update --cpus="${CLOUD_NODES_CPU_CAPACITY}" --memory="${CLOUD_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${CLOUD_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
     done
 
-    # Set resource limits and labels for edge nodes
+    # Set resource limits for edge nodes containers
     for ((i=0; i<EDGE_NODES_NUM; i++)); do
         agent_index=$((CLOUD_NODES_NUM + i))
         agent_name="k3d-${CLUSTER_NAME}-agent-${agent_index}"
