@@ -68,6 +68,52 @@ init(){
     sudo modprobe sch_netem
 }
 
+apply_network_restrictions() {
+    local agent_name=$1
+    local interface_name=$2
+
+    # Extract the values for network restrictions
+    rate_value=""
+    delay_value=""
+    loss_value=""
+    duplicate_value=""
+    corrupt_value=""
+
+    for restriction in "${EDGE_NODES_NETWORK_RESTRICTIONS[@]}"; do
+        case $restriction in
+            rate=*) rate_value="${restriction#*=}" ;;
+            delay=*) delay_value="${restriction#*=}" ;;
+            loss=*) loss_value="${restriction#*=}" ;;
+            duplicate=*) duplicate_value="${restriction#*=}" ;;
+            corrupt=*) corrupt_value="${restriction#*=}" ;;
+        esac
+    done
+
+    # Build tc commands dynamically
+    tc_commands="tc qdisc add dev ${interface_name} root handle 1: htb default 30 r2q 5;"
+    tc_commands+="tc class add dev ${interface_name} parent 1: classid 1:1 htb rate 1000mbit quantum 1514;"
+
+    if [ -n "$rate_value" ]; then
+        tc_commands+="tc class add dev ${interface_name} parent 1:1 classid 1:30 htb rate ${rate_value} quantum 1500;"
+    fi
+
+    netem_command="tc qdisc add dev ${interface_name} parent 1:30 handle 30: netem"
+    [ -n "$delay_value" ] && netem_command+=" delay ${delay_value}"
+    [ -n "$loss_value" ] && netem_command+=" loss ${loss_value}"
+    [ -n "$duplicate_value" ] && netem_command+=" duplicate ${duplicate_value}"
+    [ -n "$corrupt_value" ] && netem_command+=" corrupt ${corrupt_value}"
+    netem_command+=";"
+
+    tc_commands+="${netem_command}"
+
+    docker exec "${agent_name}" sh -c "
+        iptables -t mangle -A POSTROUTING -o ${interface_name} -j MARK --set-mark 1;
+        ${tc_commands}
+        tc filter add dev ${interface_name} protocol ip parent 1:0 prio 1 handle 1 fw flowid 1:30;
+    "
+}
+
+
 up(){
 
     cloud_args=""
@@ -133,28 +179,7 @@ up(){
         agent_name="k3d-${CLUSTER_NAME}-agent-${agent_index}"
         docker update --cpus="${EDGE_NODES_CPU_CAPACITY}" --memory="${EDGE_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${EDGE_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
         # Emulate low network restrictions for edge nodes
-        # Build tc commands dynamically
-        tc_commands="tc qdisc add dev eth0 root handle 1: htb default 30 r2q 5;"
-        tc_commands+="tc class add dev eth0 parent 1: classid 1:1 htb rate 1000mbit quantum 1514;"
-        
-        if [ -n "$rate_value" ]; then
-            tc_commands+="tc class add dev eth0 parent 1:1 classid 1:30 htb rate ${rate_value} quantum 1500;"
-        fi
-
-        netem_command="tc qdisc add dev eth0 parent 1:30 handle 30: netem"
-        [ -n "$delay_value" ] && netem_command+=" delay ${delay_value}"
-        [ -n "$loss_value" ] && netem_command+=" loss ${loss_value}"
-        [ -n "$duplicate_value" ] && netem_command+=" duplicate ${duplicate_value}"
-        [ -n "$corrupt_value" ] && netem_command+=" corrupt ${corrupt_value}"
-        netem_command+=";"
-
-        tc_commands+="${netem_command}"
-
-        docker exec "${agent_name}" sh -c "
-            iptables -t mangle -A POSTROUTING -o eth0 -j MARK --set-mark 1;
-            ${tc_commands}
-            tc filter add dev eth0 protocol ip parent 1:0 prio 1 handle 1 fw flowid 1:30;
-        "
+        apply_network_restrictions "${agent_name}" "eth0"
     done
 
     info
