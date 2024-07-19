@@ -48,6 +48,12 @@ The script supports the following commands:
 - `EDGE_NODES_MEMORY_CAPACITY_GB`: Memory capacity (in GB) for edge nodes.
 - `CLOUD_NODES_LABELS`: Labels for cloud nodes.
 - `EDGE_NODE_LABELS`: Labels for edge nodes.
+-  `EDGE_NODES_NETWORK_RESTRICTIONS`:
+    - `rate`: Rate of the network (e.g., 1mbps)
+    - `delay`: Network delay (e.g., 100ms)
+    - `loss`: Packet loss percentage (e.g., 50%)
+    - `duplicate`: Packet duplication percentage (e.g., 50%)
+    - `corrupt`: Packet corruption percentage (e.g., 10%)
 
 ### Requirements
 
