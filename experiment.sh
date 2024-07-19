@@ -4,8 +4,8 @@ K3D_INSTALL_SCRIPT="https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh
 K3D_IMAGE="ktogias/k3s:v1.30.2-k3s2-tc"
 CLUSTER_NAME="continuum"
 LOADBALANCER_PORT_MAP=8081
-CLOUD_NODES_NUM=1
-EDGE_NODES_NUM=1
+CLOUD_NODES_NUM=2
+EDGE_NODES_NUM=4
 CLOUD_NODES_CPU_CAPACITY="4"
 EDGE_NODES_CPU_CAPACITY="2"
 CLOUD_NODES_MEMORY_CAPACITY_GB="4"
@@ -130,18 +130,19 @@ wait_for_pods_ready() {
 
 up(){
 
-    cloud_args=""
-    edge_args=""
+    # Check if sch_netem is loaded, if not, load it
+    if ! lsmod | grep -q "sch_netem"; then
+        echo "Loading sch_netem module. Please provide sudo password if asked..."
+        sudo modprobe sch_netem
+    fi
 
     cloud_labels=()
     edge_labels=()
+    k3s_args=()
 
     # Generate k3s-arg and label args for cloud nodes
     for ((i=0; i<CLOUD_NODES_NUM; i++)); do
-        if [ -n "$cloud_args" ]; then
-            cloud_args+=","
-        fi
-        cloud_args+="agent:$i"
+        k3s_args+=("--k3s-arg" "--kubelet-arg=system-reserved=cpu=${CLOUD_SYSTEM_RESERVED_CPU},memory=${CLOUD_SYSTEM_RESERVED_MEMORY_KB}Ki@agent:${i}")
         for label in "${CLOUD_NODES_LABELS[@]}"; do
             cloud_labels+=("--k3s-node-label" "${label}@agent:$i")
         done
@@ -149,10 +150,7 @@ up(){
 
     # Generate k3s-arg and label args for edge nodes
     for ((i=CLOUD_NODES_NUM; i<TOTAL_NODES; i++)); do
-        if [ -n "$edge_args" ]; then
-            edge_args+=","
-        fi
-        edge_args+="agent:$i"
+        k3s_args+=("--k3s-arg" "--kubelet-arg=system-reserved=cpu=${EDGE_SYSTEM_RESERVED_CPU},memory=${EDGE_SYSTEM_RESERVED_MEMORY_KB}Ki@agent:${i}")
         for label in "${EDGE_NODES_LABELS[@]}"; do
             edge_labels+=("--k3s-node-label" "${label}@agent:$i")
         done
@@ -177,8 +175,7 @@ up(){
 
     # Create the k3d cluster
     k3d cluster create "${CLUSTER_NAME}" "${K3D_CLUSTER_CREATE_ARGS[@]}" \
-        --k3s-arg "--kubelet-arg=system-reserved=cpu=${CLOUD_SYSTEM_RESERVED_CPU},memory=${CLOUD_SYSTEM_RESERVED_MEMORY_KB}Ki@${cloud_args}" \
-        --k3s-arg "--kubelet-arg=system-reserved=cpu=${EDGE_SYSTEM_RESERVED_CPU},memory=${EDGE_SYSTEM_RESERVED_MEMORY_KB}Ki@${edge_args}" \
+        "${k3s_args[@]}" \
         "${cloud_labels[@]}" "${edge_labels[@]}"
 
     # Wait for all pods to be in Running or Completed state
