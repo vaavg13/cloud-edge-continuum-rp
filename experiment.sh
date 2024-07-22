@@ -26,12 +26,16 @@ EDGE_NODES_NETWORK_RESTRICTIONS=(
     "corrupt=10%"
 )
 
+MUBENCH_IMAGE="msvcbench/mubench"
+
 TOTAL_NODES=$((CLOUD_NODES_NUM + EDGE_NODES_NUM))
 K3D_CLUSTER_CREATE_ARGS=(
     "-p" "${LOADBALANCER_PORT_MAP}:80@loadbalancer"
     "-a" "${TOTAL_NODES}"
     "--image" "${K3D_IMAGE}"
 )
+
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
 CLOUD_NODES_MEMORY_CAPACITY_KB=$((CLOUD_NODES_MEMORY_CAPACITY_GB * 1024 * 1024))
 EDGE_NODES_MEMORY_CAPACITY_KB=$((EDGE_NODES_MEMORY_CAPACITY_GB * 1024 * 1024))
@@ -63,6 +67,9 @@ init(){
 
     #Pull k3d image
     docker pull ${K3D_IMAGE}
+    
+    #Pull mubench image
+    docker pull ${MUBENCH_IMAGE}
 
     # Load sch_netem module
     sudo modprobe sch_netem
@@ -128,6 +135,41 @@ wait_for_pods_ready() {
     done
 }
 
+start_mubench(){
+    docker run -d \
+        --rm \
+        --name mubench \
+        -v ~/.kube/:/root/.kube \
+        -v "${SCRIPT_DIR}/mubench/Configs/:/root/muBench/Configs" \
+        --network host \
+        ${MUBENCH_IMAGE}
+}
+
+stop_mubench(){
+    docker stop mubench
+}
+
+deploy_mubench(){
+    docker exec -it mubench bash -c "cd \$HOME/muBench && python3 Deployers/K8sDeployer/RunK8sDeployer.py -c Configs/K8sParameters.json"
+}
+
+apply_resource_limits(){
+    # Set resource limits for cloud nodes containers
+    for ((i=0; i<CLOUD_NODES_NUM; i++)); do
+        agent_name="k3d-${CLUSTER_NAME}-agent-${i}"
+        docker update --cpus="${CLOUD_NODES_CPU_CAPACITY}" --memory="${CLOUD_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${CLOUD_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
+    done
+
+    # Set resource limits for edge nodes containers
+    for ((i=0; i<EDGE_NODES_NUM; i++)); do
+        agent_index=$((CLOUD_NODES_NUM + i))
+        agent_name="k3d-${CLUSTER_NAME}-agent-${agent_index}"
+        docker update --cpus="${EDGE_NODES_CPU_CAPACITY}" --memory="${EDGE_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${EDGE_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
+        # Emulate low network restrictions for edge nodes
+        apply_network_restrictions "${agent_name}" "eth0"
+    done
+}
+
 up(){
 
     # Check if sch_netem is loaded, if not, load it
@@ -156,23 +198,6 @@ up(){
         done
     done
 
-     # Extract the values for network restrictions
-    rate_value=""
-    delay_value=""
-    loss_value=""
-    duplicate_value=""
-    corrupt_value=""
-
-    for restriction in "${EDGE_NODES_NETWORK_RESTRICTIONS[@]}"; do
-        case $restriction in
-            rate=*) rate_value="${restriction#*=}" ;;
-            delay=*) delay_value="${restriction#*=}" ;;
-            loss=*) loss_value="${restriction#*=}" ;;
-            duplicate=*) duplicate_value="${restriction#*=}" ;;
-            corrupt=*) corrupt_value="${restriction#*=}" ;;
-        esac
-    done
-
     # Create the k3d cluster
     k3d cluster create "${CLUSTER_NAME}" "${K3D_CLUSTER_CREATE_ARGS[@]}" \
         "${k3s_args[@]}" \
@@ -181,26 +206,22 @@ up(){
     # Wait for all pods to be in Running or Completed state
     wait_for_pods_ready
 
-    # Set resource limits for cloud nodes containers
-    for ((i=0; i<CLOUD_NODES_NUM; i++)); do
-        agent_name="k3d-${CLUSTER_NAME}-agent-${i}"
-        docker update --cpus="${CLOUD_NODES_CPU_CAPACITY}" --memory="${CLOUD_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${CLOUD_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
-    done
+    # Start MuBench Container and deploy it
+    start_mubench
+    deploy_mubench
 
-    # Set resource limits for edge nodes containers
-    for ((i=0; i<EDGE_NODES_NUM; i++)); do
-        agent_index=$((CLOUD_NODES_NUM + i))
-        agent_name="k3d-${CLUSTER_NAME}-agent-${agent_index}"
-        docker update --cpus="${EDGE_NODES_CPU_CAPACITY}" --memory="${EDGE_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${EDGE_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
-        # Emulate low network restrictions for edge nodes
-        apply_network_restrictions "${agent_name}" "eth0"
-    done
+    # Wait for all pods to be in Running or Completed state
+    wait_for_pods_ready
+
+    # Apply resource limits for edge nodes
+    apply_resource_limits
 
     info
 }
 
 down(){
     k3d cluster delete "${CLUSTER_NAME}"
+    stop_mubench
 }
 
 info(){
