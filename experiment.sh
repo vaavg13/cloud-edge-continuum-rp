@@ -51,13 +51,21 @@ EDGE_SYSTEM_RESERVED_CPU=$(( TOTAL_CPU - EDGE_NODES_CPU_CAPACITY ))
 CLOUD_SYSTEM_RESERVED_MEMORY_KB=$(( TOTAL_MEMORY_KB - CLOUD_NODES_MEMORY_CAPACITY_KB ))
 EDGE_SYSTEM_RESERVED_MEMORY_KB=$(( TOTAL_MEMORY_KB - EDGE_NODES_MEMORY_CAPACITY_KB ))
 
+NO_RESOURCE_RESTRICTIONS=false
+NO_NETWORK_RESTRICTIONS=false
+NO_MUBENCH=false
 
 usage_error() {
-    echo "Usage: $0 init|up|down"
-    echo "Use 'init' to install k3d and other dependencies."
-    echo "Use 'up' to start the cluster."
-    echo "Use 'info' to get cluster agent nodes info"
-    echo "Use 'down' to stop the cluster and remove related containers"
+    echo "Usage: $0 init|up|down|info [--no-resource-restrictions] [--no-network-restrictions] [--no-mubench]"
+    echo "Commands:"
+    echo "  init                  Install k3d and other dependencies."
+    echo "  up                    Start the cluster."
+    echo "  down                  Stop the cluster and remove related containers."
+    echo "  info                  Get cluster agent nodes info."
+    echo "Options for 'up' command:"
+    echo "  --no-resource-restrictions     Skip the application of CPU and memory restrictions."
+    echo "  --no-network-restrictions      Skip the application of network restrictions."
+    echo "  --no-mubench                   Skip the deployment of MuBench."
     exit 1
 }
 
@@ -157,14 +165,18 @@ apply_resource_limits(){
     # Set resource limits for cloud nodes containers
     for ((i=0; i<CLOUD_NODES_NUM; i++)); do
         agent_name="k3d-${CLUSTER_NAME}-agent-${i}"
-        docker update --cpus="${CLOUD_NODES_CPU_CAPACITY}" --memory="${CLOUD_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${CLOUD_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
+        if [ "$NO_RESOURCE_RESTRICTIONS" = false ]; then
+            docker update --cpus="${CLOUD_NODES_CPU_CAPACITY}" --memory="${CLOUD_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${CLOUD_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
+        fi
     done
 
     # Set resource limits for edge nodes containers
     for ((i=0; i<EDGE_NODES_NUM; i++)); do
         agent_index=$((CLOUD_NODES_NUM + i))
         agent_name="k3d-${CLUSTER_NAME}-agent-${agent_index}"
-        docker update --cpus="${EDGE_NODES_CPU_CAPACITY}" --memory="${EDGE_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${EDGE_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
+        if [ "$NO_RESOURCE_RESTRICTIONS" = false ]; then
+            docker update --cpus="${EDGE_NODES_CPU_CAPACITY}" --memory="${EDGE_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${EDGE_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
+        fi
         # Emulate low network restrictions for edge nodes
         apply_network_restrictions "${agent_name}" "eth0"
     done
@@ -184,7 +196,9 @@ up(){
 
     # Generate k3s-arg and label args for cloud nodes
     for ((i=0; i<CLOUD_NODES_NUM; i++)); do
-        k3s_args+=("--k3s-arg" "--kubelet-arg=system-reserved=cpu=${CLOUD_SYSTEM_RESERVED_CPU},memory=${CLOUD_SYSTEM_RESERVED_MEMORY_KB}Ki@agent:${i}")
+        if [ "$NO_RESOURCE_RESTRICTIONS" = false ]; then
+            k3s_args+=("--k3s-arg" "--kubelet-arg=system-reserved=cpu=${CLOUD_SYSTEM_RESERVED_CPU},memory=${CLOUD_SYSTEM_RESERVED_MEMORY_KB}Ki@agent:${i}")
+        fi
         for label in "${CLOUD_NODES_LABELS[@]}"; do
             cloud_labels+=("--k3s-node-label" "${label}@agent:$i")
         done
@@ -192,7 +206,9 @@ up(){
 
     # Generate k3s-arg and label args for edge nodes
     for ((i=CLOUD_NODES_NUM; i<TOTAL_NODES; i++)); do
-        k3s_args+=("--k3s-arg" "--kubelet-arg=system-reserved=cpu=${EDGE_SYSTEM_RESERVED_CPU},memory=${EDGE_SYSTEM_RESERVED_MEMORY_KB}Ki@agent:${i}")
+        if [ "$NO_RESOURCE_RESTRICTIONS" = false ]; then
+            k3s_args+=("--k3s-arg" "--kubelet-arg=system-reserved=cpu=${EDGE_SYSTEM_RESERVED_CPU},memory=${EDGE_SYSTEM_RESERVED_MEMORY_KB}Ki@agent:${i}")
+        fi
         for label in "${EDGE_NODES_LABELS[@]}"; do
             edge_labels+=("--k3s-node-label" "${label}@agent:$i")
         done
@@ -206,22 +222,56 @@ up(){
     # Wait for all pods to be in Running or Completed state
     wait_for_pods_ready
 
-    # Start MuBench Container and deploy it
-    start_mubench
-    deploy_mubench
+    if [ "$NO_MUBENCH" = false ]; then
+        echo "Deploying MuBench..."
+        # Start MuBench Container and deploy it
+        start_mubench
+        deploy_mubench
+        # Wait for all pods to be in Running or Completed state
+        wait_for_pods_ready
+    else
+        echo "Skipping MuBench deployment..."
+    fi
 
-    # Wait for all pods to be in Running or Completed state
-    wait_for_pods_ready
+    if [ "$NO_RESOURCE_RESTRICTIONS" = false ]; then
+        echo "Applying docker resource restrictions..."
+        # Set resource limits for cloud nodes containers
+        for ((i=0; i<CLOUD_NODES_NUM; i++)); do
+            agent_name="k3d-${CLUSTER_NAME}-agent-${i}"
+            docker update --cpus="${CLOUD_NODES_CPU_CAPACITY}" --memory="${CLOUD_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${CLOUD_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
+        done
 
-    # Apply resource limits for edge nodes
-    apply_resource_limits
+        # Set resource limits for edge nodes containers
+        for ((i=0; i<EDGE_NODES_NUM; i++)); do
+            agent_index=$((CLOUD_NODES_NUM + i))
+            agent_name="k3d-${CLUSTER_NAME}-agent-${agent_index}"
+            docker update --cpus="${EDGE_NODES_CPU_CAPACITY}" --memory="${EDGE_NODES_MEMORY_CAPACITY_GB}g" --memory-swap="${EDGE_NODES_MEMORY_CAPACITY_GB}g" "${agent_name}"
+        done
+    else 
+        echo "Skipping docker resource restrictions..."
+    fi
+
+
+    if [ "$NO_NETWORK_RESTRICTIONS" = false ]; then
+        echo "Applying network restrictions..."
+        # Apply network restrictions for edge nodes
+        for ((i=0; i<EDGE_NODES_NUM; i++)); do
+            # Emulate low network restrictions for edge nodes
+            apply_network_restrictions "${agent_name}" "eth0"
+        done
+    else 
+        echo "Skipping network restrictions..."
+    fi
 
     info
 }
 
 down(){
     k3d cluster delete "${CLUSTER_NAME}"
-    stop_mubench
+    if [ "$NO_MUBENCH" = false ]; then
+        echo "Stoping MuBench"
+        stop_mubench
+    fi
 }
 
 info(){
@@ -244,6 +294,25 @@ shift 1 || true
 if [ "${CMD}" = "init" ]; then
     init
 elif [ "${CMD}" = "up" ]; then
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --no-resource-restrictions)
+                NO_RESOURCE_RESTRICTIONS=true
+                shift
+                ;;
+            --no-network-restrictions)
+                NO_NETWORK_RESTRICTIONS=true
+                shift
+                ;;
+            --no-mubench)
+                NO_MUBENCH=true
+                shift
+                ;;
+            *)
+                usage_error
+                ;;
+        esac
+    done
     up
 elif [ "${CMD}" = "down" ]; then
     down

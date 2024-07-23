@@ -18,7 +18,10 @@ Ensure you have the following installed on your system:
 The script supports the following commands:
 
 - `init`: Install k3d and other dependencies.
-- `up`: Start the k3d cluster with the specified configurations.
+- `up`: Use this command to start the k3d cluster. Supports optional flags:
+    - `--no-resource-restrictions`: Skip the application of CPU and memory restrictions.
+    - `--no-network-restrictions`: Skip the application of network restrictions.
+    - `--no-mubench`: Skip the deployment of MuBench.
 - `info`: Display information about the cluster's agent nodes.
 - `down`: Stop the cluster and remove related containers.
 
