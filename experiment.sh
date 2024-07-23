@@ -30,6 +30,7 @@ MUBENCH_IMAGE="msvcbench/mubench"
 
 TOTAL_NODES=$((CLOUD_NODES_NUM + EDGE_NODES_NUM))
 K3D_CLUSTER_CREATE_ARGS=(
+    "--k3s-arg" "--disable=traefik@server:*"
     "-p" "${LOADBALANCER_PORT_MAP}:80@loadbalancer"
     "-a" "${TOTAL_NODES}"
     "--image" "${K3D_IMAGE}"
@@ -158,7 +159,7 @@ stop_mubench(){
 }
 
 deploy_mubench(){
-    docker exec -it mubench bash -c "cd \$HOME/muBench && python3 Deployers/K8sDeployer/RunK8sDeployer.py -c Configs/K8sParameters.json"
+    docker exec -it mubench bash -c "cd \$HOME/muBench/Monitoring/kubernetes-full-monitoring && sh ./monitoring-install.sh"
 }
 
 apply_resource_limits(){
