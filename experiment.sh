@@ -52,18 +52,28 @@ EDGE_SYSTEM_RESERVED_CPU=$(( TOTAL_CPU - EDGE_NODES_CPU_CAPACITY ))
 CLOUD_SYSTEM_RESERVED_MEMORY_KB=$(( TOTAL_MEMORY_KB - CLOUD_NODES_MEMORY_CAPACITY_KB ))
 EDGE_SYSTEM_RESERVED_MEMORY_KB=$(( TOTAL_MEMORY_KB - EDGE_NODES_MEMORY_CAPACITY_KB ))
 
+
+# Options for up
 NO_RESOURCE_RESTRICTIONS=false
 NO_NETWORK_RESTRICTIONS=false
 NO_MUBENCH=false
 
+# Options for test
+HOST="http://192.168.192.2:31113"
+USERS=10
+SPAWN_RATE=1
+TIME=2m
+
 usage_error() {
-    echo "Usage: $0 init|up|down|info [--no-resource-restrictions] [--no-network-restrictions] [--no-mubench]"
+    echo "Usage: $0 init|up|down|info|deploy|test [options]"
     echo "Commands:"
     echo "  init                  Install k3d and other dependencies."
     echo "  up                    Start the cluster."
     echo "  down                  Stop the cluster and remove related containers."
     echo "  info                  Get cluster agent nodes info."
     echo "  deploy                Deploy the micorservice mesh specified in mubench/Config."
+    echo "  test                  Start a test script to hit the endpoint s0 of the mesh."
+    echo ""
     echo "Options for 'up' command:"
     echo "  --no-resource-restrictions     Skip the application of CPU and memory restrictions."
     echo "  --no-network-restrictions      Skip the application of network restrictions."
@@ -163,6 +173,14 @@ deploy_benchmark(){
         python3 Deployers/K8sDeployer/RunK8sDeployer.py -c Configs/K8sParameters.json && \
         kubectl get pods && \
         kubectl get svc"
+}
+
+run_test(){
+    locust --headless \
+    --users ${USERS} \
+    --spawn-rate ${SRATE} \
+    -H ${HOST} \
+    -t ${TIME}
 }
 
 stop_mubench(){
@@ -332,6 +350,32 @@ elif [ "${CMD}" = "info" ]; then
     info
 elif [ "${CMD}" = "deploy" ]; then
     deploy_benchmark
+elif [ "${CMD}" = "test" ]; then
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            --users)
+                USERS="$2"
+                shift 2
+                ;;
+            --srate)
+                SRATE="$2"
+                shift 2
+                ;;
+            --host)
+                HOST="$2"
+                shift 2
+                ;;
+            --time)
+                TIME="$2"
+                shift 2
+                ;;
+            *)
+                echo "Invalid option: $1"
+                usage_error
+                ;;
+        esac
+    done
+    run_test
 else
     echo "Invalid command: ${CMD}"
     usage_error
