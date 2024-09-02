@@ -3,7 +3,7 @@
 K3D_INSTALL_SCRIPT="https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh"
 K3D_IMAGE="ktogias/k3s:v1.30.2-k3s2-tc"
 CLUSTER_NAME="continuum"
-LOADBALANCER_PORT_MAP=8081
+LOADBALANCER_PORT_MAP=8083
 CLOUD_NODES_NUM=2
 EDGE_NODES_NUM=4
 CLOUD_NODES_CPU_CAPACITY="4"
@@ -63,6 +63,7 @@ usage_error() {
     echo "  up                    Start the cluster."
     echo "  down                  Stop the cluster and remove related containers."
     echo "  info                  Get cluster agent nodes info."
+    echo "  deploy                Deploy the micorservice mesh specified in mubench/Config."
     echo "Options for 'up' command:"
     echo "  --no-resource-restrictions     Skip the application of CPU and memory restrictions."
     echo "  --no-network-restrictions      Skip the application of network restrictions."
@@ -152,6 +153,16 @@ start_mubench(){
         -v "${SCRIPT_DIR}/mubench/Configs/:/root/muBench/Configs" \
         --network host \
         ${MUBENCH_IMAGE}
+}
+
+deploy_benchmark(){
+    docker exec -it mubench /bin/bash -c "\
+        cd \$HOME/muBench/ && \
+        python3 ServiceMeshGenerator/RunServiceMeshGen.py -c Configs/ServiceMeshParameters.json && \
+        python3 WorkModelGenerator/RunWorkModelGen.py -c Configs/WorkModelParameters.json && \
+        python3 Deployers/K8sDeployer/RunK8sDeployer.py -c Configs/K8sParameters.json && \
+        kubectl get pods && \
+        kubectl get svc"
 }
 
 stop_mubench(){
@@ -319,6 +330,8 @@ elif [ "${CMD}" = "down" ]; then
     down
 elif [ "${CMD}" = "info" ]; then
     info
+elif [ "${CMD}" = "deploy" ]; then
+    deploy_benchmark
 else
     echo "Invalid command: ${CMD}"
     usage_error
