@@ -62,7 +62,7 @@ NO_MUBENCH=false
 HOST="http://192.168.192.2:31113"
 USERS=10
 SPAWN_RATE=1
-TIME=2m
+TIME='2m'
 
 usage_error() {
     echo "Usage: $0 init|up|down|info|deploy|test [options]"
@@ -313,6 +313,48 @@ info(){
     done
 }
 
+evenly_distribute_pods(){    
+    # Loop through each service and apply the patch
+    for ((i=0; i<NUMBER_OF_SERVICES; i++)); do
+        echo "Patching service s${i}..."
+        
+        kubectl patch deployment s${i} -p '{
+            "spec": {
+            "template": {
+                "spec": {
+                "topologySpreadConstraints": [
+                    {
+                    "maxSkew": 1,
+                    "topologyKey": "kubernetes.io/hostname",
+                    "whenUnsatisfiable": "DoNotSchedule",
+                    "labelSelector": {
+                        "matchLabels": {
+                        "app": "'"s${i}"'"
+                        }
+                    }
+                    }
+                ]
+                }
+            }
+            }
+        }'
+        
+        if [ $? -eq 0 ]; then
+            echo "Successfully patched s${i}"
+        else
+            echo "Failed to patch s${i}" >&2
+        fi
+    done
+
+    echo "All services patched."
+    echo "Roll Restarting all Deployments to respect spread constraints"
+
+    for ((i=0; i<NUMBER_OF_SERVICES; i++)); do
+        kubectl rollout restart deployment s${i}
+
+    done
+}
+
 # Check if no arguments were provided
 if [ $# -eq 0 ]; then
     usage_error
@@ -376,6 +418,17 @@ elif [ "${CMD}" = "test" ]; then
         esac
     done
     run_test
+elif [ "${CMD}" = "distribute" ]; then
+    # Check if a number is provided as a command-line argument
+    if [[ $# -ne 1 ]] || ! [[ $1 =~ ^[0-9]+$ ]]; then
+        echo "Usage: $0 <number-of-services>"
+        echo "Please provide a valid number of services as a command-line argument."
+        exit 1
+    fi
+
+    NUMBER_OF_SERVICES=$1
+
+    evenly_distribute_pods
 else
     echo "Invalid command: ${CMD}"
     usage_error
