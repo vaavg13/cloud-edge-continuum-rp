@@ -176,11 +176,60 @@ deploy_benchmark(){
 }
 
 run_test(){
+
+    echo "Starting Logging metrics..."
+    # Run python log.py in the background and capture its PID
+    python log.py &
+    LOG_PID=$!
+
+    echo "Starting requests to s0 with ${USERS} users for ${TIME}..."
+
+    # Run locust in the background and capture its PID
     locust --headless \
     --users ${USERS} \
     --spawn-rate ${SRATE} \
     -H ${HOST} \
-    -t ${TIME}
+    -t ${TIME} &
+    LOCUST_PID=$!
+
+    # Function to kill the processes
+    kill_processes() {
+        echo "Stoping Test.."
+        
+        # Kill python log.py if it's still running
+        if ps -p $LOG_PID > /dev/null; then
+            kill $LOG_PID
+        fi
+
+        # Kill locust if it's still running
+        if ps -p $LOCUST_PID > /dev/null; then
+            kill $LOCUST_PID
+        fi
+
+        echo "TEST ENDED."
+    }
+
+    # Wait for the locust process or user input
+    echo "Waiting for locust process to complete or press any key to stop them manually..."
+
+    while true; do
+        # Check if locust process is still running
+        if ! ps -p $LOCUST_PID > /dev/null; then
+            echo "Locust process has finished."
+            break
+        fi
+
+        # Check for user input
+        read -t 1 -n 1 key  # Wait for 1 second for user input
+        if [[ $? -eq 0 ]]; then
+            echo "User requested to stop the processes."
+            kill_processes
+            break
+        fi
+    done
+
+    # Ensure processes are killed if still running (especially log.py)
+    kill_processes
 }
 
 stop_mubench(){

@@ -3,29 +3,90 @@ import csv
 import time
 import os
 
+# Global Variables for Filenames
+NODE_CPU_FILE = 'node_cpu_usage.csv'
+NODE_MEMORY_FILE = 'node_memory_usage.csv'
+POD_CPU_FILE = 'pod_cpu_usage.csv'
+POD_MEMORY_FILE = 'pod_memory_usage.csv'
+
+# Configurations
 STEP = '30s'
 FOLDER = './logging'
+DURATION = 3600  # 1 hour
+LOG_INTERVAL = 30  # Interval between log entries
+RUN_INDEF = True
 
 # Prometheus server URL
 PROMETHEUS = "http://192.168.192.2:30000"
 
-# Function to query Prometheus for a time range
+# Queries
+node_cpu_query = 'sum(rate(node_cpu_seconds_total{mode!="idle"}[1m])) by (instance)'
+node_memory_query = 'node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100'
+pod_cpu_query = 'sum(rate(container_cpu_usage_seconds_total[1m])) by (pod, namespace)'
+pod_memory_query = 'sum(container_memory_usage_bytes) by (pod, namespace)'
+
+
+def setup_experiment_directory(parent_folder):
+    """ Set up the directory for the experiment and create the necessary files with headers. """
+    timestr = time.strftime("%Y%m%d-%H%M%S")
+    experiment_folder = 'experiment_' + timestr
+    folder = os.path.join(parent_folder, experiment_folder)
+    
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+
+    # Create the files with headers
+    filepaths = {
+        'node_cpu': os.path.join(folder, NODE_CPU_FILE),
+        'node_memory': os.path.join(folder, NODE_MEMORY_FILE),
+        'pod_cpu': os.path.join(folder, POD_CPU_FILE),
+        'pod_memory': os.path.join(folder, POD_MEMORY_FILE)
+    }
+
+    for key, filepath in filepaths.items():
+        if not os.path.isfile(filepath):
+            with open(filepath, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                if 'pod' in key:
+                    writer.writerow(['timestamp', 'node_name', 'pod_name', 'metric_value'])
+                else:
+                    writer.writerow(['timestamp', 'node_name', 'metric_value'])
+
+    return filepaths
+
+def append_to_csv(filepath, data, metadata, pod_mapping=None):
+    """ Append data to the CSV file. """
+    with open(filepath, mode='a', newline='') as file:
+        writer = csv.writer(file)
+        
+        for entry in data:
+            metric = entry['metric']
+            instance_ip = metric.get('instance', '').split(':')[0]
+            node_name = metadata.get(instance_ip, {}).get('node_name', instance_ip)
+            for value in entry['values']:
+                timestamp = value[0]
+                metric_value = value[1]
+                if pod_mapping:
+                    pod_name = metric.get('pod', 'unknown')
+                    mapped_node_name = pod_mapping.get(pod_name, 'unknown')
+                    writer.writerow([timestamp, mapped_node_name, pod_name, metric_value])
+                else:
+                    writer.writerow([timestamp, node_name, metric_value])
+
 def query_prometheus_range(query, start_time, end_time):
     response = requests.get(f"{PROMETHEUS}/api/v1/query_range", params={
         'query': query,
         'start': start_time,
         'end': end_time,
-        'step': '30s'
+        'step': STEP
     })
     result = response.json()
     return result['data']['result']
 
-# Function to get node metadata (name and zone) from Prometheus
 def get_node_metadata():
-    query = 'targets'  # Adjusting the query to fetch node info
+    query = 'targets'
     response = requests.get(f"{PROMETHEUS}/api/v1/query", params={'query': query})
     result = response.json()['data']['result']
-    # Create a mapping of instance IP to node name and zone
     
     metadata = {}
     for item in result:
@@ -50,56 +111,13 @@ def get_pod_node_mapping():
 
     return pod_node_mapping
 
-
-
-# Function to append data to CSV with folder creation and column labels
-def append_to_csv(folder, filename, data, metadata, pod_mapping=None):
-    # Ensure the directory exists
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-
-    # Full path to the file
-    filepath = os.path.join(folder, filename)
-    
-    # Check if the file exists to decide if headers are needed
-    file_exists = os.path.isfile(filepath)
-
-    # Append data to the CSV file
-    with open(filepath, mode='a', newline='') as file:
-        writer = csv.writer(file)
-        
-        # Write column headers if the file is new
-        if not file_exists:
-            if pod_mapping:
-                writer.writerow(['timestamp', 'node_name', 'pod_name', 'metric_value'])
-            else:
-                writer.writerow(['timestamp', 'node_name', 'metric_value'])
-        
-        for entry in data:
-            metric = entry['metric']
-            instance_ip = metric.get('instance', '').split(':')[0]
-            node_name = metadata.get(instance_ip, {}).get('node_name', instance_ip)
-            for value in entry['values']:
-                timestamp = value[0]
-                metric_value = value[1]
-                if pod_mapping:
-                    pod_name = metric.get('pod', 'unknown')
-                    mapped_node_name = pod_mapping.get(pod_name, 'unknown')
-                    writer.writerow([timestamp, mapped_node_name, pod_name, metric_value])
-                else:
-                    writer.writerow([timestamp, node_name, metric_value])
-
-# Queries
-node_cpu_query = 'sum(rate(node_cpu_seconds_total{mode!="idle"}[1m])) by (instance)'
-node_memory_query = 'node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100'
-pod_cpu_query = 'sum(rate(container_cpu_usage_seconds_total[1m])) by (pod, namespace)'
-pod_memory_query = 'sum(container_memory_usage_bytes) by (pod, namespace)'
-
-
 # Real-time logging loop
-def real_time_logging(duration, interval=300):
+def real_time_logging(duration, interval=300, run_until_terminated=False):
     start_time = time.time()
-    folder = 'metrics_logs'  # Specify the folder where the CSV files will be saved
+    folder = FOLDER
+
+    # Setup the directory and files for logging
+    filepaths = setup_experiment_directory(folder)
 
     # Retrieve node metadata (name and zone)
     node_metadata = get_node_metadata()
@@ -117,10 +135,11 @@ def real_time_logging(duration, interval=300):
         pod_memory_data = query_prometheus_range(pod_memory_query, start_time, end_time)
 
         # Append to CSV in the specified folder
-        append_to_csv(folder, 'node_cpu_usage.csv', node_cpu_data, node_metadata)
-        append_to_csv(folder, 'node_memory_usage.csv', node_memory_data, node_metadata)
-        append_to_csv(folder, 'pod_cpu_usage.csv', pod_cpu_data, node_metadata, pod_node_mapping)
-        append_to_csv(folder, 'pod_memory_usage.csv', pod_memory_data, node_metadata, pod_node_mapping)
+        append_to_csv(filepaths['node_cpu'], node_cpu_data, node_metadata)
+        append_to_csv(filepaths['node_memory'], node_memory_data, node_metadata)
+        append_to_csv(filepaths['pod_cpu'], pod_cpu_data, node_metadata, pod_node_mapping)
+        append_to_csv(filepaths['pod_memory'], pod_memory_data, node_metadata, pod_node_mapping)
+
         # Update start_time for next interval
         start_time = end_time
 
@@ -130,17 +149,13 @@ def real_time_logging(duration, interval=300):
         if sleep_time > 0:
             time.sleep(sleep_time)
 
-        # Check if the total duration has been exceeded
-        if end_time - start_time > duration:
+        # Check if the total duration has been exceeded unless running indefinitely
+        if not run_until_terminated and (end_time - start_time > duration):
             break
 
-# Start the real-time logging
-# Set the total duration for logging (e.g., duration of Locust test) and interval
-test_duration = 3600  # Total test duration in seconds (e.g., 1 hour)
-log_interval = 30  # Interval for logging in seconds (e.g., log every 5 minutes)
 
-real_time_logging(test_duration, log_interval)
+if __name__ == "__main__":
+    # Run indefinitely by passing True to the run_until_terminated argument
+    real_time_logging(DURATION, LOG_INTERVAL, run_until_terminated=RUN_INDEF)
 
-print("Logging completed.")
-
-print(get_node_metadata())
+    print("Logging completed.")
