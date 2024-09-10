@@ -1,0 +1,40 @@
+{
+    "spec": {
+      "template": {
+        "spec": {
+          "affinity": {
+            "nodeAffinity": {
+              "preferredDuringSchedulingIgnoredDuringExecution": [
+                {
+                  "weight": 100,
+                  "preference": {
+                    "matchExpressions": [
+                      {
+                        "key": "zone",
+                        "operator": "In",
+                        "values": ["edge"]
+                      }
+                    ]
+                  }
+                }
+              ],
+              "requiredDuringSchedulingIgnoredDuringExecution": {
+                "nodeSelectorTerms": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "zone",
+                        "operator": "In",
+                        "values": ["cloud", "edge"]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  
