@@ -160,6 +160,13 @@ stop_mubench(){
 
 deploy_mubench(){
     docker exec -it mubench bash -c "cd \$HOME/muBench/Monitoring/kubernetes-full-monitoring && sh ./monitoring-install.sh"
+    # Enable labels query for all nodes, namespaces and configmaps
+    docker exec -it mubench bash -c "helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+        --set kubeStateMetrics.collectors.node=true \
+        --set kube-state-metrics.metricLabelsAllowlist[0]=nodes=[*] \
+        --set kube-state-metrics.metricLabelsAllowlist[1]=namespaces=[*] \
+        --set kube-state-metrics.metricLabelsAllowlist[2]=configmaps=[*] \
+        -n monitoring"
 }
 
 apply_resource_limits(){
