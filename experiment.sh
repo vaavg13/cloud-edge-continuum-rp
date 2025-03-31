@@ -400,8 +400,41 @@ evenly_distribute_pods(){
 
     for ((i=0; i<NUMBER_OF_SERVICES; i++)); do
         kubectl rollout restart deployment s${i}
-
     done
+
+    # Wait for the deployments to stabilize
+    echo "Waiting for all deployments to stabilize..."
+    for ((i=0; i<NUMBER_OF_SERVICES; i++)); do
+        kubectl rollout status deployment s${i}
+    done
+
+    # Now remove the constraints after stabilization
+    remove_constraints
+}
+
+remove_constraints(){
+    echo "Removing topology spread constraints..."
+
+    for ((i=0; i<NUMBER_OF_SERVICES; i++)); do
+        echo "Patching service s${i} to remove constraints..."
+
+        kubectl patch deployment s${i} -p '{
+            "spec": {
+            "template": {
+                "spec": {
+                "topologySpreadConstraints": null
+                }
+            }
+            }
+        }'
+
+        if [ $? -eq 0 ]; then
+            echo "Successfully removed constraints from s${i}"
+        else
+            echo "Failed to remove constraints from s${i}" >&2
+        fi
+    done
+    echo "All constraints removed."
 }
 
 # Check if no arguments were provided

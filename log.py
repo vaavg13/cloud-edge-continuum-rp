@@ -84,9 +84,12 @@ def query_prometheus_range(query, start_time, end_time):
     return result['data']['result']
 
 def get_node_metadata():
-    query = 'targets'
+    query = 'kube_node_labels'
     response = requests.get(f"{PROMETHEUS}/api/v1/query", params={'query': query})
     result = response.json()['data']['result']
+
+    print(result)
+    exit()
     
     metadata = {}
     for item in result:
