@@ -1,6 +1,6 @@
 from locust import HttpUser, task
 
-class HelloWorldUser(HttpUser):
+class User(HttpUser):
     @task
-    def hello_world(self):
+    def user_request(self):
         self.client.get("/s0")
