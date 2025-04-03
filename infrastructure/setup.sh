@@ -1,36 +1,8 @@
 #!/bin/bash
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Function to print colored output
-print_status() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-# Function to check if a command exists
-check_command() {
-    if ! command -v $1 &> /dev/null; then
-        print_error "$1 is not installed. Please install it first."
-        exit 1
-    fi
-}
-
-# Function to get config value from YAML
-get_config() {
-    yq eval ".$1" config/default.yaml
-}
+# Source utility functions
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source "${SCRIPT_DIR}/../scripts/utils.sh"
 
 # Function to install required dependencies
 install_dependencies() {
@@ -91,8 +63,8 @@ create_k3d_cluster() {
     CLUSTER_ARGS="--k3s-arg --disable=traefik@server:*"
     CLUSTER_ARGS+=" -p $(get_config 'k3d.loadbalancer_port_map'):80@loadbalancer"
     CLUSTER_ARGS+=" -a $(($(get_config 'nodes.cloud.num_nodes') + $(get_config 'nodes.edge.num_nodes')))"
-    CLUSTER_ARGS+=" --image $(get_config 'k3d.image')"
-    # CLUSTER_ARGS+=" --runtime-label com.docker.compose.project=cec_emulator@all"
+    # CLUSTER_ARGS+=" --image $(get_config 'k3d.image')"
+    CLUSTER_ARGS+=" --runtime-label com.docker.compose.project=cec_emulator@all"
     
     # Create cluster with arguments from config
     k3d cluster create "$CLUSTER_NAME" $CLUSTER_ARGS
@@ -126,57 +98,6 @@ label_nodes() {
     print_status "Nodes labeled successfully"
 }
 
-# Function to prepare MuBench configuration
-prepare_mubench_config() {
-    print_status "Preparing MuBench configuration..."
-    
-    # Make sure the mubench directory exists
-    if [ ! -d "./config/mubench" ]; then
-        print_error "MuBench directory not found"
-        exit 1
-    fi
-    
-    print_status "MuBench configuration prepared successfully"
-}
-
-# Function to install MuBench
-install_mubench() {
-    print_status "Installing MuBench..."
-    
-    # Check if container already exists
-    if docker ps -a --format '{{.Names}}' | grep -q "^mubench$"; then
-        print_status "Removing existing MuBench container..."
-        docker rm -f mubench
-    fi
-    
-    # Run the MuBench container
-    docker run -d --name mubench \
-        -v $(pwd)/config/mubench:/root/mubench_custom \
-        --label com.docker.compose.project=cec_emulator \
-        $(get_config 'mubench.image')
-    
-    if [ $? -ne 0 ]; then
-        print_error "Failed to start MuBench container"
-        exit 1
-    fi
-    
-    # Update the kubeconfig in the container
-    print_status "Updating kubeconfig for MuBench..."
-    if ! ./scripts/update_kubeconfig.sh; then
-        print_error "Failed to update kubeconfig in MuBench container"
-        docker rm -f mubench
-        exit 1
-    fi
-    
-    # Wait for Kubernetes API server to be ready
-    print_status "Waiting for Kubernetes API server..."
-    until docker exec mubench kubectl get nodes &>/dev/null; do
-        sleep 5
-    done
-    
-    print_status "MuBench installed successfully"
-}
-
 # Function to setup the environment
 setup() {
     print_status "Starting environment setup..."
@@ -185,8 +106,6 @@ setup() {
     print_status "2. Install K3D if not already installed"
     print_status "3. Create K3D cluster"
     print_status "4. Label nodes as cloud and edge"
-    print_status "5. Prepare MuBench configuration"
-    print_status "6. Install and deploy MuBench"
     
     read -p "Do you want to proceed? (y/n): " confirm
     if [[ $confirm != [yY] ]]; then
@@ -215,13 +134,8 @@ setup() {
     # Label nodes
     label_nodes
     
-    # Prepare MuBench configuration
-    prepare_mubench_config
-    
-    # Install MuBench
-    install_mubench
-    
     print_status "Environment setup completed successfully"
+    # print_status "To set up MuBench, run: ./workloads/setup_mubench.sh"
 }
 
 # Main execution
@@ -246,9 +160,6 @@ main() {
             ;;
     esac
 }
-
-# Make the script executable
-chmod +x "$0"
 
 # Execute main function with all arguments
 main "$@" 
