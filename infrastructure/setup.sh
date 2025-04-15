@@ -39,13 +39,16 @@ install_k3d() {
     print_status "K3D installed successfully"
 }
 
-# Function to create K3D cluster
+# Function to create K3D cluster with specified number of agents
 create_k3d_cluster() {
     print_status "Creating K3D cluster..."
-    
-    # Get cluster name from config
+
+    # Get cluster name and node counts from config
     CLUSTER_NAME=$(get_config 'k3d.cluster_name')
-    
+    CLOUD_NODES=$(get_config 'nodes.cloud.num_nodes')
+    EDGE_NODES=$(get_config 'nodes.edge.num_nodes')
+    TOTAL_AGENTS=$((CLOUD_NODES + EDGE_NODES))
+
     # Check if cluster already exists
     if k3d cluster list | grep -q "^$CLUSTER_NAME"; then
         print_warning "Cluster '$CLUSTER_NAME' already exists"
@@ -59,43 +62,96 @@ create_k3d_cluster() {
         fi
     fi
     
-    # Get cluster arguments from config
-    CLUSTER_ARGS="--k3s-arg --disable=traefik@server:*"
-    CLUSTER_ARGS+=" -p $(get_config 'k3d.loadbalancer_port_map'):80@loadbalancer"
-    CLUSTER_ARGS+=" -a $(($(get_config 'nodes.cloud.num_nodes') + $(get_config 'nodes.edge.num_nodes')))"
-    # CLUSTER_ARGS+=" --image $(get_config 'k3d.image')"
-    CLUSTER_ARGS+=" --runtime-label com.docker.compose.project=cec_emulator@all"
+    # Create the cluster with specified number of agents
+    # Read host port configuration from config
+    PROMETHEUS_HOST_PORT=$(get_config 'k3d.host_ports.prometheus')
+    GRAFANA_HOST_PORT=$(get_config 'k3d.host_ports.grafana')
+    LOADBALANCER_HOST_PORT=$(get_config 'k3d.host_ports.loadbalancer')
+    KIALI_HOST_PORT=$(get_config 'k3d.host_ports.kiali')
     
-    # Create cluster with arguments from config
-    k3d cluster create "$CLUSTER_NAME" $CLUSTER_ARGS
-    
+    k3d cluster create "$CLUSTER_NAME" \
+        --agents "$TOTAL_AGENTS" \
+        --k3s-arg "--disable=traefik@server:*" \
+        -p "${PROMETHEUS_HOST_PORT}:30000" \
+        -p "${GRAFANA_HOST_PORT}:30001" \
+        -p "${LOADBALANCER_HOST_PORT}:80@loadbalancer" \
+        -p "${KIALI_HOST_PORT}:30003" \
+        --runtime-label "com.docker.compose.project=cec_emulator@all"
+
     if [ $? -ne 0 ]; then
         print_error "Failed to create K3D cluster"
         exit 1
     fi
-    
-    print_status "K3D cluster created successfully"
+
+    print_status "K3D cluster created successfully with $TOTAL_AGENTS agents"
 }
 
-# Function to label nodes
-label_nodes() {
-    print_status "Labeling nodes..."
-    
-    # Get node counts
+# Function to apply resource limits to nodes
+apply_node_resource_limits() {
+    print_status "Applying resource limits to nodes..."
+
+    CLUSTER_NAME=$(get_config 'k3d.cluster_name')
     CLOUD_NODES=$(get_config 'nodes.cloud.num_nodes')
     EDGE_NODES=$(get_config 'nodes.edge.num_nodes')
-    
-    # Label cloud nodes
+    CLOUD_CPU=$(get_config 'nodes.cloud.cpu_capacity')
+    CLOUD_MEM=$(get_config 'nodes.cloud.memory_capacity_gb')
+    EDGE_CPU=$(get_config 'nodes.edge.cpu_capacity')
+    EDGE_MEM=$(get_config 'nodes.edge.memory_capacity_gb')
+
+    # Convert GB to MB for smaller values
+    CLOUD_MEM_MB=$((CLOUD_MEM * 1024))
+    EDGE_MEM_MB=$((EDGE_MEM * 1024))
+
+    # Apply limits to cloud nodes
     for i in $(seq 0 $((CLOUD_NODES-1))); do
-        kubectl label node k3d-$(get_config 'k3d.cluster_name')-agent-$i zone=cloud --overwrite
+        CONTAINER_NAME="k3d-${CLUSTER_NAME}-agent-$i"
+        print_status "Applying resource limits to cloud node $i: ${CLOUD_CPU} CPU and ${CLOUD_MEM_MB}MB memory..."
+        
+        # Set memory and memory-swap together to avoid the error
+        docker update --cpus="$CLOUD_CPU" \
+                     --memory="${CLOUD_MEM_MB}m" \
+                     --memory-swap="${CLOUD_MEM_MB}m" \
+                     "$CONTAINER_NAME"
     done
-    
-    # Label edge nodes
+
+    # Apply limits to edge nodes
     for i in $(seq 0 $((EDGE_NODES-1))); do
-        kubectl label node k3d-$(get_config 'k3d.cluster_name')-agent-$((CLOUD_NODES+i)) zone=edge --overwrite
+        NODE_INDEX=$((CLOUD_NODES + i))
+        CONTAINER_NAME="k3d-${CLUSTER_NAME}-agent-$NODE_INDEX"
+        print_status "Applying resource limits to edge node $NODE_INDEX: ${EDGE_CPU} CPU and ${EDGE_MEM_MB}MB memory..."
+        
+        # Set memory and memory-swap together to avoid the error
+        docker update --cpus="$EDGE_CPU" \
+                     --memory="${EDGE_MEM_MB}m" \
+                     --memory-swap="${EDGE_MEM_MB}m" \
+                     "$CONTAINER_NAME"
     done
-    
-    print_status "Nodes labeled successfully"
+
+    print_status "Resource limits applied successfully"
+}
+
+# Function to apply labels to nodes
+apply_node_labels() {
+    print_status "Applying labels to nodes..."
+
+    CLOUD_NODES=$(get_config 'nodes.cloud.num_nodes')
+    EDGE_NODES=$(get_config 'nodes.edge.num_nodes')
+
+    # Apply labels to cloud nodes
+    for i in $(seq 0 $((CLOUD_NODES-1))); do
+        NODE_NAME="k3d-${CLUSTER_NAME}-agent-$i"
+        print_status "Applying labels to cloud node: $NODE_NAME..."
+        kubectl label node "$NODE_NAME" zone=cloud
+    done
+
+    # Apply labels to edge nodes
+    for i in $(seq 0 $((EDGE_NODES-1))); do
+        NODE_NAME="k3d-${CLUSTER_NAME}-agent-$((CLOUD_NODES + i))"
+        print_status "Applying labels to edge node: $NODE_NAME..."
+        kubectl label node "$NODE_NAME" zone=edge
+    done
+
+    print_status "Labels applied successfully"
 }
 
 # Function to setup the environment
@@ -104,8 +160,9 @@ setup() {
     print_status "The following steps will be performed:"
     print_status "1. Install dependencies (Python packages, yq)"
     print_status "2. Install K3D if not already installed"
-    print_status "3. Create K3D cluster"
-    print_status "4. Label nodes as cloud and edge"
+    print_status "3. Create K3D cluster with specified number of agents"
+    print_status "4. Apply resource limits to nodes"
+    print_status "5. Apply labels to nodes"
     
     read -p "Do you want to proceed? (y/n): " confirm
     if [[ $confirm != [yY] ]]; then
@@ -131,8 +188,11 @@ setup() {
     # Create K3D cluster
     create_k3d_cluster
     
-    # Label nodes
-    label_nodes
+    # Apply resource limits to nodes
+    apply_node_resource_limits
+    
+    # Apply labels to nodes
+    apply_node_labels
     
     print_status "Environment setup completed successfully"
     # print_status "To set up MuBench, run: ./workloads/setup_mubench.sh"

@@ -4,19 +4,6 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source "${SCRIPT_DIR}/../scripts/utils.sh"
 
-# Function to prepare MuBench configuration
-prepare_mubench_config() {
-    print_status "Preparing MuBench configuration..."
-    
-    # Make sure the mubench directory exists
-    if [ ! -d "./config/mubench" ]; then
-        print_error "MuBench directory not found"
-        exit 1
-    fi
-    
-    print_status "MuBench configuration prepared successfully"
-}
-
 # Function to install MuBench
 install_mubench() {
     print_status "Installing MuBench..."
@@ -27,14 +14,15 @@ install_mubench() {
         docker rm -f mubench
     fi
 
-    docker run -d \
+    # Run the container with basic configuration
+    DOCKER_ARGS="-d \
         --rm \
         --name mubench \
-        -v ~/.kube/:/root/.kube \
-        -v "${SCRIPT_DIR}/../mubench/Configs/:/root/muBench/Configs" \
+        -v $HOME/.kube/:/root/.kube \
         --network host \
-        --label com.docker.compose.project=cec_emulator \
-        $(get_config 'mubench.image')
+        --label com.docker.compose.project=cec_emulator"
+    
+    docker run $DOCKER_ARGS $(get_config 'mubench.image')
     
     if [ $? -ne 0 ]; then
         print_error "Failed to start MuBench container"
@@ -51,11 +39,13 @@ install_mubench() {
 }
 
 # Function to deploy MuBench monitoring
-deploy_mubench() {
+deploy_mubench_monitoring() {
     print_status "Deploying MuBench monitoring. This may take a while..."
     
     # Run the monitoring installation script and suppress its output
-    docker exec -it mubench bash -c "cd \$HOME/muBench/Monitoring/kubernetes-full-monitoring && sh ./monitoring-install.sh"
+    docker exec -it mubench bash -c "\
+        cd \$HOME/muBench/Monitoring/kubernetes-full-monitoring && \
+        sh ./monitoring-install.sh"
     
     # Check if the command completed successfully
     if [ $? -eq 0 ]; then
@@ -70,9 +60,8 @@ deploy_mubench() {
 setup() {
     print_status "Starting MuBench setup..."
     print_status "The following steps will be performed:"
-    print_status "1. Prepare MuBench configuration"
-    print_status "2. Install and deploy MuBench"
-    print_status "3. Deploy MuBench monitoring"
+    print_status "1. Install and deploy MuBench"
+    print_status "2. Deploy MuBench monitoring"
     
     read -p "Do you want to proceed? (y/n): " confirm
     if [[ $confirm != [yY] ]]; then
@@ -83,14 +72,11 @@ setup() {
     # Check required commands
     check_command "docker"
     
-    # Prepare MuBench configuration
-    prepare_mubench_config
-    
     # Install MuBench
     install_mubench
     
     # Deploy MuBench monitoring
-    deploy_mubench
+    deploy_mubench_monitoring
     
     print_status "MuBench setup completed successfully"
 }

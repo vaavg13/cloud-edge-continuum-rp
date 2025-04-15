@@ -1,4 +1,17 @@
+# Python stuff
 .venv/
 __pycache__/
-metrics_logs/
-logging/
+
+# Project stuff for later
+data/collectors/
+experiments/
+policies/
+scripts/run_experiment.sh
+workloads/applications/
+workloads/generators/
+workloads/deploy_multiple_mubench_apps.py
+workloads/deploy_mubench_app.py
+
+# Cursor stuff
+.cursor/
+data/collectors/log.py

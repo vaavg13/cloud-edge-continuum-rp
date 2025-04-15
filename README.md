@@ -1,184 +1,95 @@
-# Cloud-Edge Continuum Research Platform
+# Cloud-Edge Continuum Research Project
 
-This project provides a platform for conducting research on cloud-edge continuum architectures using K3D and MuBench.
+## Project Overview
+This research project focuses on creating comprehensive datasets that capture CPU usage patterns and microservice migrations in volatile cloud-edge environments. Using MuBench for workload emulation with real-life trace patterns (e.g., Alibaba traces), we simulate realistic scenarios including node failures, throttling, and dynamic user requests with temporal patterns. The primary goal is to collect and analyze CPU utilization across microservices and nodes, track migration events, and understand system behavior under various conditions.
 
-## Project Structure
+## Repository Structure
 
-```
-cloud-edge-continuum-rp/
-├── config/                      # Configuration files
-│   ├── default.yaml             # Main configuration file
-│   └── mubench/                 # MuBench configurations
-│       ├── K8sParameters.json   # Main MuBench configuration
-│       └── ...
-├── data/                        # Data collection and processing
-│   ├── collectors/              # Data collection modules
-│   │   └── log.py               # Metrics collection
-│   └── datasets/                # Generated datasets
-├── infrastructure/              # Infrastructure management
-│   ├── setup.sh                 # Setup script
-│   └── docker/                  # Docker image definitions
-│       └── k3d.Dockerfile       # Custom K3D image with traffic control
-├── policies/                    # Scheduling and migration policies
-│   └── affinity/                # Node affinity policies
-├── scripts/                     # Utility scripts
-│   └── run_experiment.sh        # Experiment runner script
-├── src/                         # Source code
-│   └── core/                    # Core functionality
-│       ├── apply_affinity_polices.py
-│       └── drain_nodes.py
-├── workloads/                   # Workload definitions
-│   └── generators/              # Load generators
-│       └── locustfile.py        # Locust load testing
-├── logging/                     # Legacy metrics logs
-├── requirements.txt             # Python dependencies
-└── README.md                    # This file
-```
+- `/infrastructure` - Kubernetes cluster setup and node management
+- `/workloads` - Application deployment and MuBench integration
+- `/experiments` - Test scenarios and load generation
+- `/config` - Configuration files for all components
+- `/data` - Raw and processed metrics storage
+- `/scripts` - Automation and utility scripts
+- `/policies` - Migration and scaling policies
 
-
-
-## Ideal project stracture:
-cloud-edge-continuum-rp/
-├── config/                       # Configuration files
-│   ├── default.yaml              # Default configuration
-│   ├── profiles/                 # Different experiment profiles
-│   │   ├── high_volatility.yaml  # Config for high node volatility 
-│   │   └── low_latency.yaml      # Config for low latency scenarios
-│   └── mubench/                  # MuBench specific configurations
-│       └── K8sParameters.json    # K8s deployment parameters
-│
-├── infrastructure/               # Infrastructure management
-│   ├── setup.sh                  # Main setup script
-│   ├── cleanup.sh                # Environment cleanup
-│   └── modules/                  # Modular infrastructure components
-│       ├── cluster.sh            # Cluster creation/management
-│       ├── network.sh            # Network configuration
-│       └── nodes.sh              # Node management
-│
-├── workloads/                    # Workload definitions
-│   ├── patterns/                 # Request patterns
-│   │   ├── simple_requests.py    # Basic request patterns
-│   │   └── complex_patterns.py   # More complex request patterns
-│   └── generators/               # Load generators
-│       └── locustfiles/          # Locust configurations
-│           ├── basic_load.py     # Basic load testing
-│           └── realistic_load.py # Realistic usage patterns
-│
-├── policies/                     # Scheduling and migration policies
-│   ├── affinity/                 # Node affinity policies
-│   │   └── zone_affinity.yaml    # Zone-based affinity rules
-│   ├── migration/                # Migration policies
-│   │   └── load_based.py         # Load-based migration
-│   └── volatility/               # Node volatility simulation
-│       └── edge_volatility.py    # Edge node volatility patterns
-│
-├── data/                         # Data collection and processing
-│   ├── collectors/               # Data collection modules
-│   │   ├── metrics.py            # Metrics collection
-│   │   ├── events.py             # Event logging
-│   │   └── traces.py             # Distributed tracing
-│   ├── processors/               # Data processing utilities
-│   │   ├── aggregator.py         # Data aggregation
-│   │   └── normalizer.py         # Data normalization
-│   ├── storage/                  # Data storage configurations
-│   │   └── database.py           # Database connections
-│   └── datasets/                 # Generated datasets (or symlinks)
-│       └── README.md             # Dataset documentation
-│
-├── src/                          # Core functionality
-│   ├── core/                     # Core system components
-│   │   ├── controller.py         # Main control logic
-│   │   └── scheduler.py          # Workload scheduler
-│   ├── models/                   # Data models
-│   │   └── metrics.py            # Metrics model
-│   └── utils/                    # Utility functions
-│       ├── kubernetes.py         # K8s helpers
-│       └── logging.py            # Logging utilities
-│
-├── experiments/                  # Experiment definitions
-│   ├── scenarios/                # Predefined scenarios
-│   │   ├── baseline.py           # Baseline experiment
-│   │   └── high_load.py          # High load experiment
-│   └── run.py                    # Experiment runner
-│
-├── scripts/                      # Utility scripts
-│   ├── run_experiment.sh         # Experiment runner script
-│   └── visualize_results.py      # Results visualization
-│
-├── tests/                        # Tests
-│   ├── unit/                     # Unit tests
-│   └── integration/              # Integration tests
-│
-├── docs/                         # Documentation
-│   ├── architecture.md           # System architecture
-│   └── experiments.md            # Experiment documentation
-│
-├── requirements.txt              # Python dependencies
-├── setup.py                      # Package installation
-└── README.md                     # Main project documentation
-
-## Getting Started
-
-1. Clone the repository
-2. Set up the environment
-   ```bash
-   ./infrastructure/setup.sh
-   ```
-   This will install all dependencies, create the K3D cluster, label nodes, and install MuBench after asking for confirmation.
-   
-3. Run an experiment
-   ```bash
-   ./scripts/run_experiment.sh
-   ```
-   This will run the complete experiment after asking for confirmation.
-
-## Configuration
-
-The main configuration is in `config/default.yaml`. MuBench-specific configurations are stored in the `config/mubench/` directory, with `K8sParameters.json` being the main configuration file.
-
-## Scripts
-
-- `infrastructure/setup.sh`: Sets up the environment, creates the K3D cluster, configures nodes, and installs MuBench
-  - Usage: `./infrastructure/setup.sh` (with confirmation prompt)
-- `scripts/run_experiment.sh`: Runs experiments and collects metrics
-  - Usage: `./scripts/run_experiment.sh` (complete experiment with confirmation)
-  - Usage: `./scripts/run_experiment.sh run-test` (run just the load test)
-  - Usage: `./scripts/run_experiment.sh cleanup` (clean up resources)
-
-
-## TO DO
-Dynamic CPU Stress Patterns:
-  While MuBench supports CPU stress, we need to implement dynamic patterns:
-  Add time-based CPU stress variation
-  Implement burst patterns
-Node Failure Simulation:
-  Current implementation in drain_nodes.py is random
-  Need to correlate node failures with CPU stress levels
-  Implement gradual CPU degradation patterns
-Service Migration Triggers:
-  Add CPU-based migration decision logic
-  Implement service priority based on CPU requirements
-  Add CPU threshold monitoring for migration decisions
-Workload Distribution:
-  Implement smarter distribution of CPU-intensive services
-  Add CPU load balancing between nodes
-  Consider CPU capacity when distributing services
-Metrics Collection Enhancement:
-  Add more granular CPU metrics
-  Implement CPU throttling detection
-  Add CPU contention metrics
-
-## Requirements
+## Prerequisites
 
 - Docker
+- Kubernetes CLI (kubectl)
+- K3d
 - Python 3.8+
-- kubectl
-- yq (YAML processor)
-- Locust (for load testing)
 
-## License
+## Installation
 
-[MIT License](LICENSE)
+### Automated Installation
 
+The easiest way to set up the environment is using the clean_install script:
 
+```bash
+# Clone the repository
+git clone https://github.com/your-username/cloud-edge-continuum-rp.git
+cd cloud-edge-continuum-rp
 
+# Run the clean installation script
+./scripts/clean_install.sh
+```
+
+This script will:
+1. Clean any existing environment
+2. Set up the infrastructure (K3d Kubernetes cluster)
+3. Install and configure MuBench
+
+### Manual Installation
+
+If you prefer to install components separately:
+
+1. Set up infrastructure:
+```bash
+./infrastructure/setup.sh
+```
+
+2. Install MuBench:
+```bash
+./workloads/setup_mubench.sh
+```
+
+## Running Experiments
+
+To run a basic experiment:
+
+```bash
+./scripts/run_experiment.sh
+```
+
+## Core Components
+
+### 1. Infrastructure Management (`/infrastructure`)
+- Kubernetes cluster setup with volatile node configurations
+- Node volatility simulation (failures, throttling)
+- Resource constraints implementation
+- Node health monitoring
+- Migration trigger mechanisms
+
+### 2. Workloads (`/workloads`)
+- Application deployment configurations
+- MuBench integration setup
+- Service dependency definitions
+- Base workload patterns from traces
+- Migration policy implementations
+- Resource requirement definitions
+- Service mesh configurations
+- Application scaling rules
+
+### 3. Experiments (`/experiments`)
+- Dynamic user request generators
+- Temporal pattern simulators (hourly, daily patterns)
+- Burst load generators
+- Node failure scenarios
+- Throttling experiment definitions
+- Migration trigger scenarios
+- Multi-workload interaction tests
+- Performance measurement setups
+
+## Documentation
+For detailed information about MuBench, see the [MuBench Manual](mubench_manual.md).

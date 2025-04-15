@@ -5,21 +5,25 @@ project_name: "cec_emulator"
 k3d:
   install_script: "https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh"
   cluster_name: "cec-emulator"
-  loadbalancer_port_map: 8083
+  host_ports:
+    prometheus: 9090
+    grafana: 3000
+    loadbalancer: 8083
+    kiali: 3001
 
 # Node Configuration
 nodes:
   cloud:
     num_nodes: 2
     cpu_capacity: "4"
-    memory_capacity_gb: "4"
+    memory_capacity_gb: "2"
     labels:
       - "zone=cloud"
   
   edge:
     num_nodes: 4
     cpu_capacity: "2"
-    memory_capacity_gb: "2"
+    memory_capacity_gb: "1"
     labels:
       - "zone=edge"
     network_restrictions:
@@ -38,27 +42,4 @@ test:
   host: "http://192.168.192.2:31113"
   users: 10
   spawn_rate: 1
-  duration: "2m"
-
-# Monitoring Configuration
-monitoring:
-  prometheus_url: "http://192.168.192.2:30000"
-  metrics:
-    node_cpu_file: "node_cpu_usage.csv"
-    node_memory_file: "node_memory_usage.csv"
-    pod_cpu_file: "pod_cpu_usage.csv"
-    pod_memory_file: "pod_memory_usage.csv"
-    queries:
-      node_cpu: "sum(rate(node_cpu_seconds_total{mode!=\"idle\"}[1m])) by (instance)"
-      node_memory: "node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100"
-      pod_cpu: "sum(rate(container_cpu_usage_seconds_total[1m])) by (pod, namespace)"
-      pod_memory: "sum(container_memory_usage_bytes) by (pod, namespace)"
-    step: "30s"
-  logging:
-    base_folder: "./logging"
-    duration: 3600  # 1 hour
-    log_interval: 30  # seconds
-    run_indefinitely: true
-    headers:
-      node: ["timestamp", "node_name", "metric_value"]
-      pod: ["timestamp", "node_name", "pod_name", "metric_value"] 
+  duration: "2m" 
