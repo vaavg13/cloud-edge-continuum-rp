@@ -8,7 +8,7 @@ k3d:
   host_ports:
     prometheus: 9090
     grafana: 3000
-    loadbalancer: 8083
+    mubench_service: 8083
     kiali: 3001
 
 # Node Configuration
@@ -39,7 +39,7 @@ mubench:
 
 # Test Configuration
 test:
-  host: "http://192.168.192.2:31113"
+  host: "http://localhost:31113"
   users: 10
   spawn_rate: 1
   duration: "2m" 

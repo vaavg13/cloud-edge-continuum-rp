@@ -3,7 +3,7 @@
 __pycache__/
 
 # Project stuff for later
-data/collectors/
+data/
 experiments/
 policies/
 scripts/run_experiment.sh

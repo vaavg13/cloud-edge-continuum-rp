@@ -66,7 +66,7 @@ create_k3d_cluster() {
     # Read host port configuration from config
     PROMETHEUS_HOST_PORT=$(get_config 'k3d.host_ports.prometheus')
     GRAFANA_HOST_PORT=$(get_config 'k3d.host_ports.grafana')
-    LOADBALANCER_HOST_PORT=$(get_config 'k3d.host_ports.loadbalancer')
+    MUBENCH_SERVICE_PORT=$(get_config 'k3d.host_ports.mubench_service')
     KIALI_HOST_PORT=$(get_config 'k3d.host_ports.kiali')
     
     k3d cluster create "$CLUSTER_NAME" \
@@ -74,7 +74,7 @@ create_k3d_cluster() {
         --k3s-arg "--disable=traefik@server:*" \
         -p "${PROMETHEUS_HOST_PORT}:30000" \
         -p "${GRAFANA_HOST_PORT}:30001" \
-        -p "${LOADBALANCER_HOST_PORT}:80@loadbalancer" \
+        -p "${MUBENCH_SERVICE_PORT}:31113" \
         -p "${KIALI_HOST_PORT}:30003" \
         --runtime-label "com.docker.compose.project=cec_emulator@all"
 

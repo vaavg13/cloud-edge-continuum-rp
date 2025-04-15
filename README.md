@@ -93,3 +93,6 @@ To run a basic experiment:
 
 ## Documentation
 For detailed information about MuBench, see the [MuBench Manual](mubench_manual.md).
+
+## Run inside mubench for an example application
+python3 Deployers/K8sDeployer/RunK8sDeployer.py -c Configs/K8sParameters.json
