@@ -6,6 +6,7 @@ __pycache__/
 data/
 experiments/
 policies/
+logging/**
 scripts/run_experiment.sh
 workloads/applications/
 workloads/generators/
