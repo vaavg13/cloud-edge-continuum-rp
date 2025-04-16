@@ -1,0 +1,6 @@
+# Service cell 
+The software that implements a service-cell is `CellController-mp.py`, which exposes REST/HTTP  and gRPC APIs. After that a request is received, it uses other libraries to run the internal service (`InternalServiceExecutor.py`) and, then, the external services (`ExternalServiceExecutor.py`). 
+
+`CellController-mp.py` uses Gunicorn WSGI for implementing the HTTP/REST API. HTTP requests are served by a pool of processes and threads according to the `workers` and `threads` keys in `workmodel.json`. Therefore, a service-cell at most uses a number of CPU cores equal to `workers`. In the case of gPRG, `CellController-mp.py` uses only one core (single worker). So multi-process experiments can only be performed using the REST request method.
+
+In DockeHub, the (amd64) image of the service-cell is  `msvcbench/microservice_v5-screen:latest` . The Python code `CellController-mp.py`` runs in a GNU `screen` terminal `to simplify `debugging`.` The Dockerfile used to build the image is `Dockefile.debug-mp`. 
