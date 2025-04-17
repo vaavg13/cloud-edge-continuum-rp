@@ -96,3 +96,7 @@ For detailed information about MuBench, see the [MuBench Manual](mubench_manual.
 
 ## Run inside mubench for an example application
 python3 Deployers/K8sDeployer/RunK8sDeployer.py -c Configs/K8sParameters.json
+
+
+## How this project should idealy be used.
+User goes in cli: setup-project --> a Workspace enviroment spawns (Folder). We should have folders for Infastracture and Apps, and experiments. The user can interact with the cli to create a template folder for infastracture (basicly one config.) or a template application directory. The application directory will have a workmodel.json describing the app or example Generators inside a generators folder. When the app is deployed a yaml folder will apear with the deployed yamls (i need to decide if the yamls will be persisten after undeploying the app). Also inside the folder there should be a k8parameters.json file. The experiment folder will have a config for the apps that will be used and the infastracture (specified by name). 

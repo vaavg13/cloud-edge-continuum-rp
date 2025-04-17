@@ -12,6 +12,8 @@ workloads/applications/
 workloads/generators/
 workloads/deploy_multiple_mubench_apps.py
 workloads/deploy_mubench_app.py
+test-deployments/
+TestDeployments/
 
 # Cursor stuff
 .cursor/

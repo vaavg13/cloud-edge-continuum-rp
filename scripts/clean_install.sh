@@ -17,12 +17,6 @@ clean_environment() {
         k3d cluster delete "$CLUSTER_NAME"
     fi
     
-    # Remove MuBench container if it exists
-    if docker ps -a --format '{{.Names}}' | grep -q "^mubench$"; then
-        print_status "Removing existing MuBench container..."
-        docker rm -f mubench
-    fi
-    
     print_status "Environment cleaned successfully"
 }
 
@@ -34,10 +28,6 @@ setup() {
     # Install infrastructure
     print_status "Installing infrastructure..."
     "${SCRIPT_DIR}/../infrastructure/setup.sh"
-    
-    # Install MuBench
-    print_status "Installing MuBench..."
-    "${SCRIPT_DIR}/../workloads/setup_mubench.sh"
     
     print_status "Clean installation completed successfully"
 }

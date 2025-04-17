@@ -32,14 +32,3 @@ nodes:
       loss: "50%"
       duplicate: "50%"
       corrupt: "10%"
-
-# MuBench Configuration
-mubench:
-  image: "msvcbench/mubench"
-
-# Test Configuration
-test:
-  host: "http://localhost:31113"
-  users: 10
-  spawn_rate: 1
-  duration: "2m" 
