@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from muBench.deployers import K8sDeploymentManager
+from mu_bench.deployers import K8sDeploymentManager
 
 def test_k8s_deployment_manager():
     # Load a sample workmodel

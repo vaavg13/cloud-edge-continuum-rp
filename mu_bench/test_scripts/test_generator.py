@@ -5,8 +5,8 @@ Script to generate a workmodel using both ServiceGraphGenerator and WorkModelGen
 
 import json
 import os
-from muBench.generators.service_graph_generator import ServiceGraphGenerator
-from muBench.generators.work_model_generator import WorkModelGenerator
+from mu_bench.generators.service_graph_generator import ServiceGraphGenerator
+from mu_bench.generators.work_model_generator import WorkModelGenerator
 
 # Read configurations
 with open("../Configs/ServiceGraphParameters.json") as f:
