@@ -31,7 +31,7 @@ class K8sDeploymentManager:
         nginx_gw: bool = True,
         nginx_svc_type: str = "NodePort",
         no_apply: bool = False,
-        internal_service_functions_path: str = "CustomFunctions",
+        internal_service_functions_path: str = "custom_functions",
         output_dir: str = "SimulationWorkspace"
     ):
         self.workmodel = workmodel

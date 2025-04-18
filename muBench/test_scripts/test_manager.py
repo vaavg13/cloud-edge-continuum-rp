@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from muBench.Deployers import K8sDeploymentManager
+from muBench.deployers import K8sDeploymentManager
 
 def test_k8s_deployment_manager():
     # Load a sample workmodel
@@ -14,7 +14,7 @@ def test_k8s_deployment_manager():
         workmodel=workmodel,
         no_apply=False,  # Do not actually deploy to K8s
         output_dir="test-deployments",
-        internal_service_functions_path="muBench/CustomFunctions",
+        internal_service_functions_path="muBench/custom_functions",
         namespace="test2"
     )
     try:

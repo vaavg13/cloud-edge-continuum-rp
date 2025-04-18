@@ -181,6 +181,22 @@ apply_node_labels() {
     print_status "Labels applied successfully"
 }
 
+# Function to install monitoring if enabled in config
+def install_monitoring_if_enabled() {
+    MONITORING_ENABLED=$(get_config 'monitoring.install')
+    if [[ "$MONITORING_ENABLED" == "true" ]]; then
+        print_status "Monitoring installation enabled in config. Installing monitoring..."
+        bash ./install_monitoring.sh
+        if [ $? -ne 0 ]; then
+            print_error "Failed to install monitoring."
+            exit 1
+        fi
+        print_status "Monitoring installed successfully."
+    else
+        print_status "Monitoring installation is disabled in config. Skipping monitoring setup."
+    fi
+}
+
 # Function to setup the environment
 setup() {
     print_status "Starting environment setup..."
@@ -220,6 +236,9 @@ setup() {
     
     # Apply labels to nodes
     apply_node_labels
+    
+    # Install monitoring if enabled
+    install_monitoring_if_enabled
     
     print_status "Environment setup completed successfully"
     # print_status "To set up MuBench, run: ./workloads/setup_mubench.sh"
