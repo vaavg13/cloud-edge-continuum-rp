@@ -51,11 +51,11 @@ class K8sDeploymentManager:
         self.deployment_dir = None  # Will be set on deploy
         self.nfs_conf = dict()  # Placeholder for NFS config if needed
 
-    def _create_unique_deployment_dir(self):
-        os.makedirs(self.output_dir, exist_ok=True)
-        ns_dir = os.path.join(self.output_dir, self.namespace)
-        os.makedirs(os.path.join(ns_dir, "yamls"), exist_ok=True)
-        self.deployment_dir = ns_dir
+    def _prepare_deployment_dir(self):
+        # Only create the yamls folder inside the existing output_dir
+        yamls_dir = os.path.join(self.output_dir, "yamls")
+        os.makedirs(yamls_dir, exist_ok=True)
+        self.deployment_dir = self.output_dir
         # Save deployment parameters for reproducibility
         params = {
             "workmodel": self.workmodel,
@@ -73,9 +73,9 @@ class K8sDeploymentManager:
             "internal_service_functions_path": self.internal_service_functions_path,
             "output_dir": self.output_dir
         }
-        with open(os.path.join(ns_dir, "k8parameters.json"), "w") as f:
+        with open(os.path.join(self.output_dir, "k8parameters.json"), "w") as f:
             json.dump(params, f, indent=2)
-        return ns_dir
+        return self.output_dir
 
     @classmethod
     def from_deployment_dir(cls, deployment_dir):
@@ -168,7 +168,7 @@ class K8sDeploymentManager:
                 f"Namespace '{self.namespace}' is already occupied by existing resources. "
                 "No YAMLs will be generated or deployed."
             )
-        deployment_dir = self._create_unique_deployment_dir()
+        deployment_dir = self._prepare_deployment_dir()
         self._generate_yamls()
         yamls_folder = os.path.join(deployment_dir, "yamls")
         if not self.no_apply:
@@ -187,9 +187,7 @@ class K8sDeploymentManager:
         deployer.undeploy(yamls_folder)
 
     def cleanup(self):
-        if self.deployment_dir and os.path.exists(self.deployment_dir):
-            shutil.rmtree(self.deployment_dir)
-            self.deployment_dir = None
-            folder = os.path.dirname(self.deployment_dir)
-            if os.path.exists(folder):
-                shutil.rmtree(folder)
+        if self.deployment_dir:
+            yamls_dir = os.path.join(self.deployment_dir, "yamls")
+            if os.path.exists(yamls_dir):
+                shutil.rmtree(yamls_dir)
