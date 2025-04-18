@@ -197,17 +197,42 @@ def install_monitoring_if_enabled() {
     fi
 }
 
+# Function to clean existing environment (migrated from clean_install.sh)
+clean_environment() {
+    print_status "Cleaning existing environment..."
+    CLUSTER_NAME=$(get_config 'k3d.cluster_name')
+    # Delete K3D cluster if it exists
+    if k3d cluster list | grep -q "^$CLUSTER_NAME"; then
+        print_status "Deleting existing K3D cluster..."
+        k3d cluster delete "$CLUSTER_NAME"
+    fi
+    print_status "Environment cleaned successfully"
+}
+
 # Function to setup the environment
 setup() {
     print_status "Starting environment setup..."
     print_status "The following steps will be performed:"
-    print_status "1. Install dependencies (Python packages, yq)"
-    print_status "2. Install K3D if not already installed"
-    print_status "3. Create K3D cluster with specified number of agents"
-    print_status "4. Apply resource limits to nodes"
-    print_status "5. Apply labels to nodes"
+    print_status "1. Clean existing environment (if requested)"
+    print_status "2. Install dependencies (Python packages, yq)"
+    print_status "3. Install K3D if not already installed"
+    print_status "4. Create K3D cluster with specified number of agents"
+    print_status "5. Apply resource limits to nodes"
+    print_status "6. Apply labels to nodes"
     
-    read -p "Do you want to proceed? (y/n): " confirm
+    # Ask if user wants to clean existing environment if cluster exists
+    CLUSTER_NAME=$(get_config 'k3d.cluster_name')
+    if k3d cluster list | grep -q "^$CLUSTER_NAME"; then
+        print_warning "Cluster '$CLUSTER_NAME' already exists."
+        read -p "Do you want to clean the existing environment before setup? (y/n): " clean_confirm
+        if [[ $clean_confirm == [yY] ]]; then
+            clean_environment
+        else
+            print_status "Skipping environment cleaning. Proceeding with setup."
+        fi
+    fi
+    
+    read -p "Do you want to proceed with the setup? (y/n): " confirm
     if [[ $confirm != [yY] ]]; then
         print_status "Setup cancelled."
         exit 0
@@ -252,10 +277,14 @@ main() {
     fi
     
     case "$1" in
+        "clean")
+            clean_environment
+            ;;
         "help"|"-h"|"--help")
             echo "Usage: $0 [command]"
             echo "Commands:"
-            echo "  (no arguments)  - Run complete setup with confirmation"
+            echo "  (no arguments)  - Run complete setup with confirmation (asks before cleaning if infra exists)"
+            echo "  clean           - Clean existing environment (delete cluster)"
             echo "  help            - Show this help message"
             ;;
         *)
