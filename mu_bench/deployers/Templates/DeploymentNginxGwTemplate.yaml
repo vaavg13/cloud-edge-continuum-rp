@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gw-nginx
-  namespace: {{NAMESPACE}}
+  namespace: {{ namespace }}
   labels:  
     app: gw-nginx
     version: "1.0"
@@ -30,7 +30,7 @@ spec:
           subPath: nginx.conf
         - mountPath: /var/log/nginx
           name: log
-      schedulerName: {{SCHEDULER_NAME}}
+      schedulerName: {{ scheduler_name }}
       volumes:
       - name: config-volume
         configMap:
@@ -42,14 +42,14 @@ apiVersion: v1
 kind: Service
 metadata:
   name: gw-nginx
-  namespace: {{NAMESPACE}}
+  namespace: {{ namespace }}
 spec:
-  type: {{SVCTYPE}}
+  type: {{ svc_type }}
   ports:
     - port: 80
       protocol: TCP
       targetPort: 80
-      nodePort: 31113
+      nodePort: {{ nginx_node_port }}
       name: http-nginx
   selector:
     app: gw-nginx

@@ -5,6 +5,7 @@ __pycache__/
 # Project stuff for later
 test-deployments/
 TestDeployments/
+APPS/
 
 # Cursor stuff
 .cursor/

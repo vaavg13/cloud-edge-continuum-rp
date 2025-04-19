@@ -1,7 +1,7 @@
 apiVersion: v1
 data:
-  {{DATA}}
+  {{ data }}
 kind: ConfigMap
 metadata:
   name: internal-services
-  namespace: {{NAMESPACE}}
+  namespace: {{ namespace }}

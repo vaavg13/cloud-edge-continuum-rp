@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: gw-nginx
-  namespace: {{NAMESPACE}}
+  namespace: {{ namespace }}
 data:
   nginx.conf: |
     user nginx;
@@ -19,7 +19,7 @@ data:
         '"$request_method '
         '$request_uri" '
         '$status -'
-        ' http:/$request_uri.{{NAMESPACE}}.svc.cluster.local';
+        ' http:/$request_uri.{{ namespace }}.svc.cluster.local';
 
         access_log  /etc/nginx/access.log main;
         #access_log  /var/log/nginx/access.log main;
@@ -32,14 +32,14 @@ data:
                     proxy_read_timeout 5m;
                     proxy_connect_timeout 5m;
                     proxy_send_timeout 5m;
-                    resolver {{RESOLVER}};
-                    proxy_pass http:/$request_uri.{{NAMESPACE}}.svc.cluster.local{{PATH}};
+                    resolver {{ resolver }};
+                    proxy_pass http:/$request_uri.{{ namespace }}.svc.cluster.local{{ path }};
                     proxy_http_version 1.1;
                 }
                 location ~* /update$ {
-                    resolver {{RESOLVER}};
+                    resolver {{ resolver }};
                     rewrite ^(/.*)/update$ /update break;
-                    proxy_pass http:/$1.{{NAMESPACE}}.svc.cluster.local;
+                    proxy_pass http:/$1.{{ namespace }}.svc.cluster.local;
                     proxy_http_version 1.1;
                 }
         }

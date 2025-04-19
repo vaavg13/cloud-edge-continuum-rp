@@ -28,7 +28,8 @@ check_command() {
 }
 # Function to get config value from YAML
 get_config() {
-    yq eval ".$1" default.yaml
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    yq eval ".$1" "$SCRIPT_DIR/default.yaml"
 }
 
 # Function to install required dependencies
@@ -36,7 +37,7 @@ install_dependencies() {
     print_status "Installing required dependencies..."
     
     # Check and install Python dependencies
-    pip3 install -q -r requirements.txt
+    # pip3 install -q -r requirements.txt
     
     # Install yq if not available
     if ! command -v yq &> /dev/null; then
@@ -182,11 +183,12 @@ apply_node_labels() {
 }
 
 # Function to install monitoring if enabled in config
-def install_monitoring_if_enabled() {
+install_monitoring_if_enabled() {
     MONITORING_ENABLED=$(get_config 'monitoring.install')
     if [[ "$MONITORING_ENABLED" == "true" ]]; then
         print_status "Monitoring installation enabled in config. Installing monitoring..."
-        bash ./install_monitoring.sh
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        bash "$SCRIPT_DIR/monitoring/install_monitoring.sh"
         if [ $? -ne 0 ]; then
             print_error "Failed to install monitoring."
             exit 1

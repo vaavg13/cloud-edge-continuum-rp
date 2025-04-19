@@ -9,6 +9,7 @@ import datetime
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 import json
+from mu_bench.utils.pretty_print import print_status, print_error, print_warning
 
 class K8sDeploymentManager:
     """
@@ -21,7 +22,7 @@ class K8sDeploymentManager:
         self,
         workmodel: dict,
         prefix_yaml_file: str = "mubench",
-        namespace: str = "default",
+        namespace: str = "test",
         image: str = "msvcbench/microservice:latest",
         cluster_domain: str = "cluster",
         path: str = "/api/v1",
@@ -31,8 +32,9 @@ class K8sDeploymentManager:
         nginx_gw: bool = True,
         nginx_svc_type: str = "NodePort",
         no_apply: bool = False,
-        internal_service_functions_path: str = "custom_functions",
-        output_dir: str = "SimulationWorkspace"
+        internal_service_functions_path: str = "./mu_bench/custom_functions",
+        output_dir: str = "SimulationWorkspace",
+        nginx_node_port: int = 31114
     ):
         self.workmodel = workmodel
         self.prefix_yaml_file = prefix_yaml_file
@@ -48,6 +50,7 @@ class K8sDeploymentManager:
         self.no_apply = no_apply
         self.internal_service_functions_path = internal_service_functions_path
         self.output_dir = output_dir
+        self.nginx_node_port = nginx_node_port
         self.deployment_dir = None  # Will be set on deploy
         self.nfs_conf = dict()  # Placeholder for NFS config if needed
 
@@ -58,7 +61,6 @@ class K8sDeploymentManager:
         self.deployment_dir = self.output_dir
         # Save deployment parameters for reproducibility
         params = {
-            "workmodel": self.workmodel,
             "prefix_yaml_file": self.prefix_yaml_file,
             "namespace": self.namespace,
             "image": self.image,
@@ -71,7 +73,8 @@ class K8sDeploymentManager:
             "nginx_svc_type": self.nginx_svc_type,
             "no_apply": self.no_apply,
             "internal_service_functions_path": self.internal_service_functions_path,
-            "output_dir": self.output_dir
+            "output_dir": self.output_dir,
+            "nginx_node_port": self.nginx_node_port
         }
         with open(os.path.join(self.output_dir, "k8parameters.json"), "w") as f:
             json.dump(params, f, indent=2)
@@ -80,16 +83,21 @@ class K8sDeploymentManager:
     @classmethod
     def from_deployment_dir(cls, deployment_dir):
         """
-        Alternative constructor: initialize manager from a deployment directory containing k8parameters.json
+        Alternative constructor: initialize manager from a deployment directory containing k8parameters.json and workmodel.json
         """
         params_path = os.path.join(deployment_dir, "k8parameters.json")
+        workmodel_path = os.path.join(deployment_dir, "workmodel.json")
         if not os.path.exists(params_path):
             raise RuntimeError(f"k8parameters.json not found in {deployment_dir}")
+        if not os.path.exists(workmodel_path):
+            raise RuntimeError(f"workmodel.json not found in {deployment_dir}")
         with open(params_path, "r") as f:
             params = json.load(f)
+        with open(workmodel_path, "r") as f:
+            workmodel = json.load(f)
         # Remove deployment_dir from params to avoid passing it twice
         params.pop("deployment_dir", None)
-        instance = cls(**params)
+        instance = cls(workmodel=workmodel, **params)
         instance.deployment_dir = deployment_dir
         return instance
 
@@ -104,9 +112,9 @@ class K8sDeploymentManager:
             scheduler_name=self.scheduler_name,
             nginx_gw=self.nginx_gw,
             nginx_svc_type=self.nginx_svc_type,
+            nginx_node_port=self.nginx_node_port
         )
-        builder.customize_workmodel(self.workmodel)
-        builder.generate_all_yamls(
+        builder.customize_and_generate_yamls(
             workmodel=self.workmodel,
             nfs_conf=self.nfs_conf,
             output_path=self.deployment_dir,
@@ -162,32 +170,70 @@ class K8sDeploymentManager:
         return False
 
     def deploy(self):
-        self._ensure_namespace_exists()
-        if self._namespace_is_occupied():
-            raise RuntimeError(
-                f"Namespace '{self.namespace}' is already occupied by existing resources. "
-                "No YAMLs will be generated or deployed."
-            )
-        deployment_dir = self._prepare_deployment_dir()
-        self._generate_yamls()
-        yamls_folder = os.path.join(deployment_dir, "yamls")
-        if not self.no_apply:
-            deployer = K8sYamlDeployer()
-            deployer.deploy(yamls_folder, sleep=self.sleep)
-        return deployment_dir
+        try:
+            print_status(f"Ensuring namespace '{self.namespace}' exists...")
+            self._ensure_namespace_exists()
+            if self._namespace_is_occupied():
+                print_error(
+                    f"Namespace '{self.namespace}' is already occupied by existing resources. "
+                    "No YAMLs will be generated or deployed."
+                )
+                return None
+            deployment_dir = self._prepare_deployment_dir()
+            print_status(f"Generating YAMLs in '{deployment_dir}/yamls'...")
+            self._generate_yamls()
+            yamls_folder = os.path.join(deployment_dir, "yamls")
+            if not self.no_apply:
+                print_status(f"Deploying resources from '{yamls_folder}'...")
+                deployer = K8sYamlDeployer()
+                try:
+                    deployer.deploy(yamls_folder, sleep=self.sleep)
+                    print_status("Deployment completed successfully.")
+                except Exception as e:
+                    print_error(f"Deployment failed: {e}")
+                    raise
+            else:
+                print_warning("YAMLs generated but not applied (no_apply=True).")
+            return deployment_dir
+        except Exception as e:
+            print_error(f"Deployment process failed: {e}")
+            raise
 
     def undeploy(self):
         if not self.deployment_dir:
-            raise RuntimeError(
-                "No deployment_dir set. "  
-                "Deploy first or specify the directory to undeploy."
+            print_error(
+                "No deployment_dir set. Deploy first or specify the directory to undeploy."
             )
+            return
         yamls_folder = os.path.join(self.deployment_dir, "yamls")
+        print_status(f"Undeploying resources from '{yamls_folder}'...")
         deployer = K8sYamlDeployer()
-        deployer.undeploy(yamls_folder)
+        deleted_any = False
+        not_found_count = 0
+        total_resources = 0
+        for yaml_file in deployer._collect_yaml_files(yamls_folder):
+            for resource in deployer._load_yaml(yaml_file):
+                total_resources += 1
+                try:
+                    deployer._undeploy_resource(resource)
+                    deleted_any = True
+                except ApiException as e:
+                    if e.status == 404:
+                        not_found_count += 1
+                    else:
+                        print_error(f"Undeployment failed: {e}")
+                        raise
+        if not deleted_any and not_found_count == total_resources:
+            print_status("Nothing to delete: all resources were already removed.")
+        elif deleted_any:
+            print_status("Undeployment completed successfully.")
 
     def cleanup(self):
         if self.deployment_dir:
             yamls_dir = os.path.join(self.deployment_dir, "yamls")
             if os.path.exists(yamls_dir):
-                shutil.rmtree(yamls_dir)
+                try:
+                    shutil.rmtree(yamls_dir)
+                    print_status(f"Cleaned up yamls directory: {yamls_dir}")
+                except Exception as e:
+                    print_warning(f"Failed to clean up yamls directory: {e}")
