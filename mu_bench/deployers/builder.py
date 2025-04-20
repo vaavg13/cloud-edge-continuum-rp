@@ -132,7 +132,6 @@ class K8sYamlBuilder:
             self.create_nginx_gateway_files(output_path)
 
     def create_deployment_service_yaml_files(self, workmodel, nfs, output_path):
-        namespace = self.namespace
         for counter, (service, conf) in enumerate(workmodel.items(), 1):
             resources, rank_string = self._build_resource_block(conf, counter)
             node_affinity = self._build_node_affinity(conf.get("node_affinity"))
