@@ -28,8 +28,7 @@ def scaffold_app(template_name, app_name, apps_dir=DEFAULT_APPS_DIR, templates_d
             k8params = json.load(f)
         # Patch app-sensitive fields
         k8params['output_dir'] = f"APPS/{app_name}"
-        # Optionally patch other fields if needed, e.g. namespace or image
-        # k8params['namespace'] = app_name  # Uncomment if you want namespace to match app_name
+        k8params['namespace'] = app_name  # Set namespace to app_name
         with open(k8params_path, 'w') as f:
             json.dump(k8params, f, indent=2)
     return dst

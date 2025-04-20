@@ -169,6 +169,32 @@ class K8sDeploymentManager:
             pass
         return False
 
+    def _nginx_nodeport_is_available(self):
+        """
+        Checks if the desired nginx_node_port is available across all namespaces.
+        Returns True if available, False if in use.
+        """
+        config.load_kube_config()
+        k8s_core_api = client.CoreV1Api()
+        desired_port = self.nginx_node_port
+        # Only check if nginx_gw is True and NodePort is requested
+        if not (self.nginx_gw and self.nginx_svc_type == "NodePort"):
+            return True
+        try:
+            services = k8s_core_api.list_service_for_all_namespaces().items
+            for svc in services:
+                if svc.spec.type == "NodePort" and svc.spec.ports:
+                    for port in svc.spec.ports:
+                        if port.node_port == desired_port:
+                            print_error(
+                                f"NodePort {desired_port} is already in use by service '{svc.metadata.name}' in namespace '{svc.metadata.namespace}'."
+                            )
+                            return False
+            return True
+        except Exception as e:
+            print_warning(f"Failed to check NodePort availability: {e}")
+            return False
+
     def deploy(self):
         try:
             print_status(f"Ensuring namespace '{self.namespace}' exists...")
@@ -178,6 +204,10 @@ class K8sDeploymentManager:
                     f"Namespace '{self.namespace}' is already occupied by existing resources. "
                     "No YAMLs will be generated or deployed."
                 )
+                return None
+            # Check NodePort availability before proceeding
+            if not self._nginx_nodeport_is_available():
+                print_error(f"Aborting deployment due to NodePort conflict.")
                 return None
             deployment_dir = self._prepare_deployment_dir()
             print_status(f"Generating YAMLs in '{deployment_dir}/yamls'...")

@@ -1,7 +1,6 @@
 import os
 import yaml
 import json
-from pprint import pprint
 from copy import deepcopy
 from jinja2 import Environment, FileSystemLoader
 
@@ -40,7 +39,7 @@ class K8sYamlBuilder:
         self.nginx_node_port = nginx_node_port
         self.K8s_YAML_BUILDER_PATH = os.path.dirname(os.path.abspath(__file__))
         self.env = Environment(
-            loader=FileSystemLoader(f"{self.K8s_YAML_BUILDER_PATH}/Templates"),
+            loader=FileSystemLoader(f"{self.K8s_YAML_BUILDER_PATH}/templates"),
             trim_blocks=True,
             lstrip_blocks=True
         )
@@ -107,29 +106,6 @@ class K8sYamlBuilder:
             }
         }
 
-    def customize_workmodel(self, workmodel):
-        for service in workmodel:
-            base_url = (
-                f"{service}.{self.namespace}"
-                f".svc.{self.cluster_domain}.local"
-            )
-            workmodel[service].update({
-                "url": base_url,
-                "path": self.path,
-                "image": self.image,
-                "namespace": self.namespace
-            })
-            optional_params = [
-                "scheduler-name", "replicas", "cpu-requests", "cpu-limits",
-                "memory-requests", "memory-limits"
-            ]
-            for param in optional_params:
-                if hasattr(self, param.replace('-', '_')):
-                    workmodel[service].update(
-                        {param: getattr(self, param.replace('-', '_'))}
-                    )
-        print("Work Model Updated!")
-
     def generate_all_yamls(self, workmodel, nfs_conf, output_path, internal_service_functions_path):
         self.create_deployment_service_yaml_files(workmodel, nfs_conf, output_path)
         self.create_configmap_yaml_file(
@@ -154,7 +130,6 @@ class K8sYamlBuilder:
         )
         if self.nginx_gw:
             self.create_nginx_gateway_files(output_path)
-        print("All YAMLs generated!")
 
     def create_deployment_service_yaml_files(self, workmodel, nfs, output_path):
         namespace = self.namespace
@@ -166,9 +141,9 @@ class K8sYamlBuilder:
             template = self.env.get_template("DeploymentTemplate.yaml")
             content = template.render(
                 service_name=service,
-                namespace=namespace,
+                namespace=self.namespace,
                 scheduler_name=conf.get("scheduler-name", self.scheduler_name),
-                image=conf["image"],
+                image=conf.get("image", self.image),
                 replicas=conf.get("replicas", 1),
                 node_affinity=yaml.dump(node_affinity) if node_affinity else None,
                 pod_antiaffinity=yaml.dump(pod_antiaffinity) if pod_antiaffinity else None,
@@ -188,7 +163,7 @@ class K8sYamlBuilder:
             service_template = self.env.get_template("ServiceTemplate.yaml")
             service_content = service_template.render(
                 service_name=service,
-                namespace=namespace
+                namespace=self.namespace
             )
             service_filename = (
                 f"{output_path}/yamls/"
@@ -206,7 +181,6 @@ class K8sYamlBuilder:
             f"{self.prefix_yaml_file}-{output_suffix}"
         )
         self._write_yaml(output_file, content)
-        print(f"{output_suffix.replace('.yaml','')} Created!")
 
     def _get_internal_service_data(self, internal_service_functions_path):
         data_dict = {}
@@ -244,7 +218,6 @@ class K8sYamlBuilder:
         self._write_yaml(deployment_output, deploy_content)
 
     def customize_and_generate_yamls(self, workmodel, nfs_conf, output_path, internal_service_functions_path):
-        self.customize_workmodel(workmodel)
         self.generate_all_yamls(
             workmodel=workmodel,
             nfs_conf=nfs_conf,

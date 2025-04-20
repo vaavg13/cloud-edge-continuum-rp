@@ -52,7 +52,6 @@ class K8sYamlDeployer:
             self.k8s_core_api.read_namespace(name=namespace)
         except ApiException as ns_err:
             if ns_err.status == 404:
-                print(f"Namespace '{namespace}' does not exist. Creating...")
                 ns_body = client.V1Namespace(metadata=client.V1ObjectMeta(name=namespace))
                 self.k8s_core_api.create_namespace(ns_body)
             else:
