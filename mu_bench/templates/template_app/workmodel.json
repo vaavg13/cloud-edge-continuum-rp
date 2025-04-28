@@ -43,10 +43,7 @@
     "request_method": "rest",
     "workers": 4,
     "threads": 16,
-    "url": "s0.default.svc.cluster.local",
-    "path": "/api/v1",
-    "image": "msvcbench/microservice_v6-screen:1.0",
-    "namespace": "default"
+    "url": "s0.default.svc.cluster.local"
   },
   "s1": {
     "external_services": [
@@ -89,10 +86,7 @@
     "request_method": "rest",
     "workers": 4,
     "threads": 16,
-    "url": "s1.default.svc.cluster.local",
-    "path": "/api/v1",
-    "image": "msvcbench/microservice_v6-screen:1.0",
-    "namespace": "default"
+    "url": "s1.default.svc.cluster.local"
   },
   "s2": {
     "external_services": [
@@ -135,9 +129,6 @@
     "request_method": "rest",
     "workers": 4,
     "threads": 16,
-    "url": "s2.default.svc.cluster.local",
-    "path": "/api/v1",
-    "image": "msvcbench/microservice_v6-screen:1.0",
-    "namespace": "default"
+    "url": "s2.default.svc.cluster.local"
   }
 }

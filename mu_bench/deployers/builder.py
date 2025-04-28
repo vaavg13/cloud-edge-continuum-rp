@@ -1,8 +1,10 @@
 import os
 import yaml
 import json
-from copy import deepcopy
 from jinja2 import Environment, FileSystemLoader
+from copy import deepcopy
+from collections import defaultdict
+from .expander import expand_workmodel
 
 
 def indent_block(text, spaces=2):
@@ -106,18 +108,45 @@ class K8sYamlBuilder:
             }
         }
 
+    def customize_workmodel(self, workmodel):
+        for service in workmodel:
+            base_url = (
+                f"{service}.{self.namespace}"
+                f".svc.{self.cluster_domain}.local"
+            )
+            workmodel[service].update({
+                "url": base_url,
+                "path": self.path,
+                "image": self.image,
+                "namespace": self.namespace
+            })
+
     def generate_all_yamls(self, workmodel, nfs_conf, output_path, internal_service_functions_path):
-        self.create_deployment_service_yaml_files(workmodel, nfs_conf, output_path)
+        # Expand workmodel expands individual deployments into separate services
+        # For example, if the workmodel has a service "s0" with deployments
+        # "s0-edge-site-1" and "s0-edge-site-2", the expanded workmodel will have
+        # two services: "s0-edge-site-1" and "s0-edge-site-2", each with the same
+        # configuration as "s0" but with the deployment name added to the service name.
+        # The node_affinity will be set per deployment. This does not affect services 
+        # without deployments.
+        expanded_workmodel = expand_workmodel(workmodel)
+
+        # Create deployment and service YAML files
+        self.create_deployment_service_yaml_files(expanded_workmodel, nfs_conf, output_path)
+        
+        # Create workmodel configmap
         self.create_configmap_yaml_file(
-            workmodel=workmodel,
+            workmodel=expanded_workmodel,
             output_path=output_path,
             template_name="ConfigMapWorkmodelTemplate.yaml",
             context={
-                "workmodel": '    ' + '    '.join(json.dumps(workmodel, indent=2).splitlines(True)),
+                "workmodel": '    ' + '    '.join(json.dumps(expanded_workmodel, indent=2).splitlines(True)),
                 "namespace": self.namespace
             },
             output_suffix="ConfigMapWorkmodel.yaml"
         )
+
+        # Create internal services configmap
         self.create_configmap_yaml_file(
             workmodel=None,
             output_path=output_path,
@@ -128,25 +157,27 @@ class K8sYamlBuilder:
             },
             output_suffix="ConfigMapInternalServices.yaml"
         )
+
+        # Create nginx gateway files
         if self.nginx_gw:
             self.create_nginx_gateway_files(output_path)
 
     def create_deployment_service_yaml_files(self, workmodel, nfs, output_path):
         for counter, (service, conf) in enumerate(workmodel.items(), 1):
+            # Deployment YAML
             resources, rank_string = self._build_resource_block(conf, counter)
             node_affinity = self._build_node_affinity(conf.get("node_affinity"))
             pod_antiaffinity = self._build_pod_antiaffinity(service) if conf.get('pod_antiaffinity') else None
-            sidecar = conf.get("sidecar", None)
             template = self.env.get_template("DeploymentTemplate.yaml")
             content = template.render(
                 service_name=service,
                 namespace=self.namespace,
-                scheduler_name=conf.get("scheduler-name", self.scheduler_name),
-                image=conf.get("image", self.image),
+                scheduler_name=self.scheduler_name,
+                image=self.image,
                 replicas=conf.get("replicas", 1),
                 node_affinity=yaml.dump(node_affinity) if node_affinity else None,
                 pod_antiaffinity=yaml.dump(pod_antiaffinity) if pod_antiaffinity else None,
-                sidecar=sidecar,
+                sidecar=conf.get("sidecar", None),
                 pn=str(conf.get('workers', 1)),
                 tn=str(conf.get('threads', 4)),
                 resources=yaml.dump(resources) if resources else '{}'
@@ -158,6 +189,7 @@ class K8sYamlBuilder:
                 f"Deployment-{service}.yaml"
             )
             self._write_yaml(deployment_filename, content)
+            
             # Service YAML
             service_template = self.env.get_template("ServiceTemplate.yaml")
             service_content = service_template.render(
@@ -217,6 +249,7 @@ class K8sYamlBuilder:
         self._write_yaml(deployment_output, deploy_content)
 
     def customize_and_generate_yamls(self, workmodel, nfs_conf, output_path, internal_service_functions_path):
+        self.customize_workmodel(workmodel)
         self.generate_all_yamls(
             workmodel=workmodel,
             nfs_conf=nfs_conf,
