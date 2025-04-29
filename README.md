@@ -1,6 +1,7 @@
 # Cloud-Edge Continuum Research Project
 
 ## Project Overview
+
 This research project focuses on creating comprehensive datasets that capture CPU usage patterns and microservice migrations in volatile cloud-edge environments. Using MuBench for workload emulation with real-life trace patterns (e.g., Alibaba traces), we simulate realistic scenarios including node failures, throttling, and dynamic user requests with temporal patterns. The primary goal is to collect and analyze CPU utilization across microservices and nodes, track migration events, and understand system behavior under various conditions.
 
 ## Repository Structure
@@ -39,6 +40,7 @@ cd cloud-edge-continuum-rp
 ```
 
 This script will:
+
 1. Clean any existing environment
 2. Set up the infrastructure (K3d Kubernetes cluster)
 3. Install and configure MuBench
@@ -48,14 +50,16 @@ This script will:
 If you prefer to install components separately:
 
 1. Set up infrastructure:
-```bash
-./infrastructure/setup.sh
-```
+
+    ```bash
+    ./infrastructure/setup.sh
+    ```
 
 2. Install MuBench:
-```bash
-# (see mu_bench/ for details)
-```
+
+    ```bash
+    # (see mu_bench/ for details)
+    ```
 
 ## Running Experiments
 
@@ -68,18 +72,21 @@ To run a basic experiment:
 ## Core Components
 
 ### 1. Infrastructure Management (`/infrastructure`)
+
 - K3d Kubernetes cluster setup 
 - Node volatility simulation (failures, throttling)
 - Resource constraints implementation
 - Monitoring Instalation
 
 ### 2. Application Management (`/APPS`)
+
 - Application templates and deployment configurations
 - `workmodel.json` for describing microservice structure and placement
 - Service dependency definitions and resource requirements
 - Generated deployment yamls
 
 ### 3. MuBench Framework (`/mu_bench`)
+
 - Workload emulation, request generation, and deployment automation
 - CLI tools, deployers, and experiment templates
 - **Note:** `/mu_bench/add_ons/` is deprecated and will be refactored in future releases
@@ -159,6 +166,7 @@ python3 -m mu_bench.cli.undeploy_app --app-dir APPS/myapp
 ---
 
 ## Project Roadmap & Next Steps
+
 - Refactor for modular Python library structure and improved automation
 - Integrate node affinity and topology-aware deployment directly into deployment logic
 - Add Istio for ingress and advanced routing

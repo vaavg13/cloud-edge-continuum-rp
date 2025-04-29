@@ -34,7 +34,8 @@ class K8sDeploymentManager:
         no_apply: bool = False,
         internal_service_functions_path: str = "./mu_bench/custom_functions",
         output_dir: str = "SimulationWorkspace",
-        nginx_node_port: int = 31114
+        nginx_node_port: int = 31114,
+        istio_injection: bool = False
     ):
         self.workmodel = workmodel
         self.prefix_yaml_file = prefix_yaml_file
@@ -51,6 +52,7 @@ class K8sDeploymentManager:
         self.internal_service_functions_path = internal_service_functions_path
         self.output_dir = output_dir
         self.nginx_node_port = nginx_node_port
+        self.istio_injection = istio_injection
         self.deployment_dir = None  # Will be set on deploy
         self.nfs_conf = dict()  # Placeholder for NFS config if needed
 
@@ -74,7 +76,8 @@ class K8sDeploymentManager:
             "no_apply": self.no_apply,
             "internal_service_functions_path": self.internal_service_functions_path,
             "output_dir": self.output_dir,
-            "nginx_node_port": self.nginx_node_port
+            "nginx_node_port": self.nginx_node_port,
+            "istio_injection": self.istio_injection
         }
         with open(os.path.join(self.output_dir, "k8parameters.json"), "w") as f:
             json.dump(params, f, indent=2)
@@ -139,6 +142,14 @@ class K8sDeploymentManager:
                 k8s_core_api.create_namespace(ns_body)
             else:
                 raise RuntimeError(f"Failed to ensure namespace '{namespace}': {ns_err}")
+        # Istio injection label if requested
+        if self.istio_injection:
+            try:
+                body = {"metadata": {"labels": {"istio-injection": "enabled"}}}
+                k8s_core_api.patch_namespace(name=namespace, body=body)
+                print_status(f"Labeled namespace '{namespace}' with istio-injection=enabled.")
+            except Exception as e:
+                print_warning(f"Failed to label namespace '{namespace}' for Istio injection: {e}")
 
     def _namespace_is_occupied(self):
         config.load_kube_config()

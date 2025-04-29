@@ -212,16 +212,7 @@ clean_environment() {
 }
 
 # Function to setup the environment
-setup() {
-    print_status "Starting environment setup..."
-    print_status "The following steps will be performed:"
-    print_status "1. Clean existing environment (if requested)"
-    print_status "2. Install dependencies (Python packages, yq)"
-    print_status "3. Install K3D if not already installed"
-    print_status "4. Create K3D cluster with specified number of agents"
-    print_status "5. Apply resource limits to nodes"
-    print_status "6. Apply labels to nodes"
-    
+setup() {  
     # Ask if user wants to clean existing environment if cluster exists
     CLUSTER_NAME=$(get_config 'k3d.cluster_name')
     if k3d cluster list | grep -q "^$CLUSTER_NAME"; then
@@ -233,6 +224,14 @@ setup() {
             print_status "Skipping environment cleaning. Proceeding with setup."
         fi
     fi
+
+    print_status "Starting environment setup..."
+    print_status "The following steps will be performed:"
+    print_status "1. Clean existing environment (if requested)"
+    print_status "2. Install K3D if not already installed"
+    print_status "3. Create K3D cluster with specified number of agents"
+    print_status "4. Apply resource limits to nodes"
+    print_status "5. Apply labels to nodes"
     
     read -p "Do you want to proceed with the setup? (y/n): " confirm
     if [[ $confirm != [yY] ]]; then

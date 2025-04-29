@@ -11,5 +11,6 @@
   "nginx_svc_type": "NodePort",
   "no_apply": false,
   "internal_service_functions_path": "./mu_bench/custom_functions",
-  "output_dir": "APPS/app1"
+  "output_dir": "APPS/app1",
+  "istio_injection": false
 }

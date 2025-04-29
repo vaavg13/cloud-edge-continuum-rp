@@ -16,16 +16,16 @@ nodes:
   cloud:
     num_nodes: 2
     cpu_capacity: "4"
-    memory_capacity_gb: "2"
+    memory_capacity_gb: "4"
     labels:
-      - "zone=cloud"
+      - "topology.kubernetes.io/zone=cloud"
   
   edge:
     num_nodes: 4
-    cpu_capacity: "2"
-    memory_capacity_gb: "1"
+    cpu_capacity: "4"
+    memory_capacity_gb: "4"
     labels:
-      - "zone=edge"
+      - "topology.kubernetes.io/zone=edge"
     network_restrictions:
       rate: "1mbps"
       delay: "100ms"
