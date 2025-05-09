@@ -6,6 +6,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Absolute path to the script's directory
+SCRIPT_ABSOLUTE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Function to print colored output
 print_status() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -26,10 +29,10 @@ check_command() {
         exit 1
     fi
 }
+
 # Function to get config value from YAML
 get_config() {
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    yq eval ".$1" "$SCRIPT_DIR/default.yaml"
+    yq eval ".$1" "$SCRIPT_ABSOLUTE_DIR/default.yaml"
 }
 
 # Function to install required dependencies
@@ -45,6 +48,21 @@ install_dependencies() {
         wget -qO /tmp/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
         chmod +x /tmp/yq
         sudo mv /tmp/yq /usr/local/bin/
+    fi
+
+    # Install jq if not available
+    if ! command -v jq &> /dev/null; then
+        print_status "Installing jq..."
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get update -y && sudo apt-get install -y jq
+        elif command -v yum &> /dev/null; then
+            sudo yum install -y jq
+        elif command -v dnf &> /dev/null; then
+            sudo dnf install -y jq
+        else
+            print_error "Could not find apt-get, yum, or dnf to install jq. Please install jq manually."
+            exit 1
+        fi
     fi
     
     print_status "Dependencies installed successfully"
@@ -71,11 +89,9 @@ install_k3d() {
 create_k3d_cluster() {
     print_status "Creating K3D cluster..."
 
-    # Get cluster name and node counts from config
+    # Get cluster name from config
     CLUSTER_NAME=$(get_config 'k3d.cluster_name')
-    CLOUD_NODES=$(get_config 'nodes.cloud.num_nodes')
-    EDGE_NODES=$(get_config 'nodes.edge.num_nodes')
-    TOTAL_AGENTS=$((CLOUD_NODES + EDGE_NODES))
+    TOTAL_AGENTS=$(jq '. | length' "$SCRIPT_ABSOLUTE_DIR/nodes.json")
 
     # Check if cluster already exists
     if k3d cluster list | grep -q "^$CLUSTER_NAME"; then
@@ -100,10 +116,10 @@ create_k3d_cluster() {
     k3d cluster create "$CLUSTER_NAME" \
         --agents "$TOTAL_AGENTS" \
         --k3s-arg "--disable=traefik@server:*" \
-        -p "${PROMETHEUS_HOST_PORT}:30000" \
-        -p "${GRAFANA_HOST_PORT}:30001" \
-        -p "${MUBENCH_SERVICE_PORT}:31113" \
-        -p "${KIALI_HOST_PORT}:30003" \
+        -p "${PROMETHEUS_HOST_PORT}:30000@loadbalancer" \
+        -p "${GRAFANA_HOST_PORT}:30001@loadbalancer" \
+        -p "${MUBENCH_SERVICE_PORT}:31113@loadbalancer" \
+        -p "${KIALI_HOST_PORT}:30003@loadbalancer" \
         --runtime-label "com.docker.compose.project=cec_emulator@all"
 
     if [ $? -ne 0 ]; then
@@ -119,39 +135,24 @@ apply_node_resource_limits() {
     print_status "Applying resource limits to nodes..."
 
     CLUSTER_NAME=$(get_config 'k3d.cluster_name')
-    CLOUD_NODES=$(get_config 'nodes.cloud.num_nodes')
-    EDGE_NODES=$(get_config 'nodes.edge.num_nodes')
-    CLOUD_CPU=$(get_config 'nodes.cloud.cpu_capacity')
-    CLOUD_MEM=$(get_config 'nodes.cloud.memory_capacity_gb')
-    EDGE_CPU=$(get_config 'nodes.edge.cpu_capacity')
-    EDGE_MEM=$(get_config 'nodes.edge.memory_capacity_gb')
+    TOTAL_AGENTS=$(jq '. | length' "$SCRIPT_ABSOLUTE_DIR/nodes.json")
 
-    # Convert GB to MB for smaller values
-    CLOUD_MEM_MB=$((CLOUD_MEM * 1024))
-    EDGE_MEM_MB=$((EDGE_MEM * 1024))
+    # Apply limits to each node based on the configuration list
+    for i in $(seq 0 $((TOTAL_AGENTS-1))); do
+        NODE_CPU=$(jq -r ".[${i}].cpu_capacity" "$SCRIPT_ABSOLUTE_DIR/nodes.json")
+        NODE_MEM_GB_RAW=$(jq -r ".[${i}].memory_capacity_gb" "$SCRIPT_ABSOLUTE_DIR/nodes.json")
+        
+        # Ensure NODE_MEM_GB_RAW is treated as a number for arithmetic
+        NODE_MEM_GB=$(echo "$NODE_MEM_GB_RAW" | awk '{print int($1)}') # more robust way to ensure it's an integer
+        NODE_MEM_MB=$((NODE_MEM_GB * 1024))
 
-    # Apply limits to cloud nodes
-    for i in $(seq 0 $((CLOUD_NODES-1))); do
         CONTAINER_NAME="k3d-${CLUSTER_NAME}-agent-$i"
-        print_status "Applying resource limits to cloud node $i: ${CLOUD_CPU} CPU and ${CLOUD_MEM_MB}MB memory..."
+        print_status "Applying resource limits to node $i (container: ${CONTAINER_NAME}): ${NODE_CPU} CPU and ${NODE_MEM_MB}MB memory..."
         
         # Set memory and memory-swap together to avoid the error
-        docker update --cpus="$CLOUD_CPU" \
-                     --memory="${CLOUD_MEM_MB}m" \
-                     --memory-swap="${CLOUD_MEM_MB}m" \
-                     "$CONTAINER_NAME"
-    done
-
-    # Apply limits to edge nodes
-    for i in $(seq 0 $((EDGE_NODES-1))); do
-        NODE_INDEX=$((CLOUD_NODES + i))
-        CONTAINER_NAME="k3d-${CLUSTER_NAME}-agent-$NODE_INDEX"
-        print_status "Applying resource limits to edge node $NODE_INDEX: ${EDGE_CPU} CPU and ${EDGE_MEM_MB}MB memory..."
-        
-        # Set memory and memory-swap together to avoid the error
-        docker update --cpus="$EDGE_CPU" \
-                     --memory="${EDGE_MEM_MB}m" \
-                     --memory-swap="${EDGE_MEM_MB}m" \
+        docker update --cpus="$NODE_CPU" \
+                     --memory="${NODE_MEM_MB}m" \
+                     --memory-swap="${NODE_MEM_MB}m" \
                      "$CONTAINER_NAME"
     done
 
@@ -162,24 +163,42 @@ apply_node_resource_limits() {
 apply_node_labels() {
     print_status "Applying labels to nodes..."
 
-    CLOUD_NODES=$(get_config 'nodes.cloud.num_nodes')
-    EDGE_NODES=$(get_config 'nodes.edge.num_nodes')
+    CLUSTER_NAME=$(get_config 'k3d.cluster_name')
+    TOTAL_AGENTS=$(jq '. | length' "$SCRIPT_ABSOLUTE_DIR/nodes.json")
 
-    # Apply labels to cloud nodes
-    for i in $(seq 0 $((CLOUD_NODES-1))); do
-        NODE_NAME="k3d-${CLUSTER_NAME}-agent-$i"
-        print_status "Applying labels to cloud node: $NODE_NAME..."
-        kubectl label node "$NODE_NAME" zone=cloud
-    done
-
-    # Apply labels to edge nodes
-    for i in $(seq 0 $((EDGE_NODES-1))); do
-        NODE_NAME="k3d-${CLUSTER_NAME}-agent-$((CLOUD_NODES + i))"
-        print_status "Applying labels to edge node: $NODE_NAME..."
-        kubectl label node "$NODE_NAME" zone=edge
+    # Apply labels to each node based on the configuration list
+    for i in $(seq 0 $((TOTAL_AGENTS-1))); do
+        NODE_K8S_NAME="k3d-${CLUSTER_NAME}-agent-$i"
+        NODE_ZONE=$(jq -r ".[${i}].zone" "$SCRIPT_ABSOLUTE_DIR/nodes.json")
+        
+        print_status "Applying label topology.kubernetes.io/zone=${NODE_ZONE} to node $i (k8s_name: $NODE_K8S_NAME)..."
+        kubectl label node "$NODE_K8S_NAME" "topology.kubernetes.io/zone=${NODE_ZONE}" --overwrite
     done
 
     print_status "Labels applied successfully"
+}
+
+# Function to apply taint to the control-plane node
+apply_control_plane_taint() {
+    # print_status "Applying taint to control-plane node..." # Reduced verbosity
+    CLUSTER_NAME=$(get_config 'k3d.cluster_name')
+    CONTROL_PLANE_NODE_NAME="k3d-${CLUSTER_NAME}-server-0" # Standard k3d naming
+    
+    # print_status "Waiting for control-plane node '$CONTROL_PLANE_NODE_NAME' to be ready..." # Reduced verbosity
+    if ! kubectl wait --for=condition=Ready node/"$CONTROL_PLANE_NODE_NAME" --timeout=120s > /dev/null 2>&1; then # Silenced kubectl wait output
+        print_error "Control-plane node '$CONTROL_PLANE_NODE_NAME' did not become ready in time or was not found."
+        print_error "Skipping control-plane taint application."
+        return 1
+    fi
+
+    # print_status "Tainting node '$CONTROL_PLANE_NODE_NAME' with 'node-role.kubernetes.io/control-plane=true:NoSchedule'..." # Reduced verbosity
+    if kubectl taint node "$CONTROL_PLANE_NODE_NAME" node-role.kubernetes.io/control-plane=true:NoSchedule --overwrite > /dev/null 2>&1; then # Silenced kubectl taint output
+        print_status "Taint applied successfully to $CONTROL_PLANE_NODE_NAME."
+    else
+        print_error "Failed to apply taint to $CONTROL_PLANE_NODE_NAME."
+        return 1
+    fi
+    return 0
 }
 
 # Function to install monitoring if enabled in config
@@ -187,8 +206,7 @@ install_monitoring_if_enabled() {
     MONITORING_ENABLED=$(get_config 'monitoring.install')
     if [[ "$MONITORING_ENABLED" == "true" ]]; then
         print_status "Monitoring installation enabled in config. Installing monitoring..."
-        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-        bash "$SCRIPT_DIR/monitoring/install_monitoring.sh"
+        bash "$SCRIPT_ABSOLUTE_DIR/monitoring/install_monitoring.sh"
         if [ $? -ne 0 ]; then
             print_error "Failed to install monitoring."
             exit 1
@@ -262,6 +280,9 @@ setup() {
     
     # Apply labels to nodes
     apply_node_labels
+    
+    # Apply taint to control-plane node
+    apply_control_plane_taint
     
     # Install monitoring if enabled
     install_monitoring_if_enabled

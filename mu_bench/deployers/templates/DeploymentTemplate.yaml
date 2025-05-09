@@ -14,7 +14,6 @@ spec:
     matchLabels:
       app: {{ service_name }}
   replicas: {{ replicas }}
-  {% if node_affinity %}{{ node_affinity | indent(2) }}{% endif %}
   template:
     metadata:
       labels:
@@ -28,6 +27,12 @@ spec:
     spec:
       terminationGracePeriodSeconds : 3
       schedulerName: {{ scheduler_name }}
+      {% if node_affinity %}
+      {{- node_affinity | indent(6) }}
+      {% endif %}
+      {% if pod_antiaffinity %}
+      {{- pod_antiaffinity | indent(6) }}
+      {% endif %}
       containers:
         - name: {{ service_name }}
           image: {{ image }}
@@ -56,12 +61,16 @@ spec:
               value: "{{ pn }}"
             - name: TN
               value: "{{ tn }}"
-          resources: {{ resources | indent(10) }}
+          {% if resources_content == "{}" %}
+          resources: {}
+          {% else %}
+          resources:
+{{ resources_content | indent(12) }}
+          {% endif %}
           {% if sidecar %}
         - name: {{ service_name }}-sidecar
           image: {{ sidecar }}
           {% endif %}
-      {% if pod_antiaffinity %}{{ pod_antiaffinity | indent(6) }}{% endif %}
       volumes:
         - name: podinfo
           downwardAPI:

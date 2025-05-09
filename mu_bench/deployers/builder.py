@@ -55,6 +55,7 @@ class K8sYamlBuilder:
     def _build_resource_block(self, service_conf, counter):
         resources = {}
         rank_string = str(counter).zfill(5)
+        
         if "cpu-requests" in service_conf:
             cpu_req = service_conf["cpu-requests"]
             resources.setdefault('requests', {})['cpu'] = cpu_req
@@ -62,6 +63,7 @@ class K8sYamlBuilder:
                 rank_string = str(int(cpu_req.replace('m', ''))).zfill(5)
             else:
                 rank_string = str(int(float(cpu_req) * 1000)).zfill(5)
+
         if "memory-requests" in service_conf:
             mem_req = service_conf["memory-requests"]
             resources.setdefault('requests', {})['memory'] = mem_req
@@ -71,18 +73,31 @@ class K8sYamlBuilder:
             resources.setdefault('limits', {})['memory'] = service_conf['memory-limits']
         return resources, rank_string
 
-    def _build_node_affinity(self, values):
-        if not values:
+    def _build_node_affinity(self, affinity_string: str | None):
+        if not affinity_string or not isinstance(affinity_string, str):
             return None
+        
+        parts = affinity_string.split('=')
+        if len(parts) != 2:
+            print(f"Warning: Malformed node_affinity string: '{affinity_string}'. Expected format 'key=value'.")
+            return None
+        
+        key = parts[0].strip()
+        value = parts[1].strip()
+
+        if not key or not value:
+            print(f"Warning: Malformed node_affinity string: '{affinity_string}'. Key or value is empty.")
+            return None
+
         return {
             'affinity': {
                 'nodeAffinity': {
                     'requiredDuringSchedulingIgnoredDuringExecution': {
                         'nodeSelectorTerms': [{
                             'matchExpressions': [{
-                                'key': 'kubernetes.io/hostname',
+                                'key': key,
                                 'operator': 'In',
-                                'values': values
+                                'values': [value]
                             }]
                         }]
                     }
@@ -165,9 +180,15 @@ class K8sYamlBuilder:
     def create_deployment_service_yaml_files(self, workmodel, nfs, output_path):
         for counter, (service, conf) in enumerate(workmodel.items(), 1):
             # Deployment YAML
-            resources, rank_string = self._build_resource_block(conf, counter)
+            resources_dict, rank_string = self._build_resource_block(conf, counter)
             node_affinity = self._build_node_affinity(conf.get("node_affinity"))
             pod_antiaffinity = self._build_pod_antiaffinity(service) if conf.get('pod_antiaffinity') else None
+            
+            if not resources_dict: # If the Python dictionary is empty
+                resources_content = "{}" # No leading spaces for empty case
+            else: # If the dictionary is populated
+                resources_content = yaml.dump(resources_dict, indent=2, default_flow_style=False).strip()
+            
             template = self.env.get_template("DeploymentTemplate.yaml")
             content = template.render(
                 service_name=service,
@@ -180,7 +201,7 @@ class K8sYamlBuilder:
                 sidecar=conf.get("sidecar", None),
                 pn=str(conf.get('workers', 1)),
                 tn=str(conf.get('threads', 4)),
-                resources=yaml.dump(resources) if resources else '{}'
+                resources_content=resources_content # Pass the fully prepared content string
             )
             deployment_filename = (
                 f"{output_path}/yamls/"
