@@ -14,8 +14,12 @@ case "$1" in
     shift
     python -m mu_bench.cli.scaffold_app "$@"
     ;;
+  export-metrics)
+    shift
+    python -m mu_bench.cli.export_metrics "$@"
+    ;;
   *)
-    echo "Usage: $0 {deploy|undeploy|scaffold} [args...]"
+    echo "Usage: $0 {deploy|undeploy|scaffold|export-metrics} [args...]"
     exit 1
     ;;
 esac
