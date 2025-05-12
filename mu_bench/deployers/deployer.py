@@ -14,6 +14,7 @@ class K8sYamlDeployer:
         config.load_kube_config()
         self.k8s_apps_api = client.AppsV1Api()
         self.k8s_core_api = client.CoreV1Api()
+        self.k8s_autoscaling_api = client.AutoscalingV2Api()
 
     def deploy(self, folder, sleep=0):
         for yaml_file in self._collect_yaml_files(folder):
@@ -76,6 +77,10 @@ class K8sYamlDeployer:
             if self._resource_exists(self.k8s_core_api.read_namespaced_config_map, name, namespace):
                 raise Exception(f"ConfigMap '{name}' already exists in namespace '{namespace}'.")
             self.k8s_core_api.create_namespaced_config_map(namespace=namespace, body=resource)
+        elif kind == "HorizontalPodAutoscaler":
+            if self._resource_exists(self.k8s_autoscaling_api.read_namespaced_horizontal_pod_autoscaler, name, namespace):
+                raise Exception(f"HorizontalPodAutoscaler '{name}' already exists in namespace '{namespace}'.")
+            self.k8s_autoscaling_api.create_namespaced_horizontal_pod_autoscaler(namespace=namespace, body=resource)
 
     def _undeploy_resource(self, resource):
         kind = resource.get("kind")
@@ -88,6 +93,8 @@ class K8sYamlDeployer:
             self.k8s_core_api.delete_namespaced_service(name=name, namespace=namespace, grace_period_seconds=0)
         elif kind == "ConfigMap":
             self.k8s_core_api.delete_namespaced_config_map(name=name, namespace=namespace)
+        elif kind == "HorizontalPodAutoscaler":
+            self.k8s_autoscaling_api.delete_namespaced_horizontal_pod_autoscaler(name=name, namespace=namespace)
 
     def _resource_exists(self, read_func, name, namespace):
         try:

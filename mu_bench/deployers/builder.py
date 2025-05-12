@@ -105,24 +105,6 @@ class K8sYamlBuilder:
             }
         }
 
-    def _build_pod_antiaffinity(self, service):
-        return {
-            'affinity': {
-                'podAntiAffinity': {
-                    'requiredDuringSchedulingIgnoredDuringExecution': [{
-                        'labelSelector': {
-                            'matchExpressions': [{
-                                'key': 'app',
-                                'operator': 'In',
-                                'values': [service]
-                            }]
-                        },
-                        'topologyKey': 'kubernetes.io/hostname'
-                    }]
-                }
-            }
-        }
-
     def customize_workmodel(self, workmodel):
         for service in workmodel:
             base_url = (
@@ -179,16 +161,25 @@ class K8sYamlBuilder:
 
     def create_deployment_service_yaml_files(self, workmodel, nfs, output_path):
         for counter, (service, conf) in enumerate(workmodel.items(), 1):
-            # Deployment YAML
+            # Resource requests and limits YAML
             resources_dict, rank_string = self._build_resource_block(conf, counter)
+            if not resources_dict: 
+                resources_content = "{}" 
+            else: 
+                resources_content = yaml.dump(
+                    resources_dict, indent=2, default_flow_style=False
+                ).strip()
+
+
+            # Node affinity YAML
             node_affinity = self._build_node_affinity(conf.get("node_affinity"))
-            pod_antiaffinity = self._build_pod_antiaffinity(service) if conf.get('pod_antiaffinity') else None
-            
-            if not resources_dict: # If the Python dictionary is empty
-                resources_content = "{}" # No leading spaces for empty case
-            else: # If the dictionary is populated
-                resources_content = yaml.dump(resources_dict, indent=2, default_flow_style=False).strip()
-            
+
+            # Autoscaler YAML (if autoscaling is enabled)
+            autoscaling = conf.get("autoscaling", {})
+            if autoscaling.get("enabled"):
+                self.create_autoscaler_yaml_file(service, autoscaling, output_path, rank_string)
+
+            # Deployment YAML
             template = self.env.get_template("DeploymentTemplate.yaml")
             content = template.render(
                 service_name=service,
@@ -197,7 +188,7 @@ class K8sYamlBuilder:
                 image=self.image,
                 replicas=conf.get("replicas", 1),
                 node_affinity=yaml.dump(node_affinity) if node_affinity else None,
-                pod_antiaffinity=yaml.dump(pod_antiaffinity) if pod_antiaffinity else None,
+                pod_antiaffinity= None,
                 sidecar=conf.get("sidecar", None),
                 pn=str(conf.get('workers', 1)),
                 tn=str(conf.get('threads', 4)),
@@ -224,6 +215,28 @@ class K8sYamlBuilder:
                 f"Service-{service}.yaml"
             )
             self._write_yaml(service_filename, service_content)
+
+
+    def create_autoscaler_yaml_file(self, service, autoscaling, output_path, rank_string):
+        """
+        Generate and write the autoscaler YAML file for a service if autoscaling is enabled.
+        """
+        autoscaler_template = self.env.get_template("AutoscalerTemplate.yaml")
+        autoscaler_content = autoscaler_template.render(
+            service_name=service,
+            namespace=self.namespace,
+            min=autoscaling.get("min", 1),
+            max=autoscaling.get("max", 10),
+            metric=autoscaling.get("metric", "cpu"),
+            target=autoscaling.get("target", 70)
+        )
+        autoscaler_filename = (
+            f"{output_path}/yamls/"
+            f"{self.prefix_yaml_file}-"
+            f"{str(rank_string).zfill(3)}-"
+            f"Autoscaler-{service}.yaml"
+        )
+        self._write_yaml(autoscaler_filename, autoscaler_content)
 
     def create_configmap_yaml_file(self, workmodel, output_path, template_name, context, output_suffix):
         template = self.env.get_template(template_name)
