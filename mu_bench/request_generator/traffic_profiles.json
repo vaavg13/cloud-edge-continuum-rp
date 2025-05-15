@@ -1,0 +1,69 @@
+{
+  "seasonality_profiles": {
+    "office_hours_peak": {
+      "pattern_type": "sinusoidal",
+      "baseline": 0.2,
+      "amplitude": 0.8,
+      "peak_time_hour": 14,
+      "period_hours": 24,
+      "comment": "Typical 9-5 style traffic with a peak mid-afternoon."
+    },
+    "evening_low_steady": {
+      "pattern_type": "constant",
+      "load_factor": 0.3,
+      "comment": "Steady, lower traffic during evening hours."
+    },
+    "night_minimal": {
+      "pattern_type": "constant",
+      "load_factor": 0.05,
+      "comment": "Minimal traffic during deep night."
+    },
+    "morning_ramp": {
+      "pattern_type": "sinusoidal",
+      "baseline": 0.1,
+      "amplitude": 0.5,
+      "peak_time_hour": 10,
+      "period_hours": 24,
+      "comment": "Gradual ramp-up in the morning."
+    },
+    "weekend_day_curve": {
+      "pattern_type": "sinusoidal",
+      "baseline": 0.3, 
+      "amplitude": 0.4, 
+      "peak_time_hour": 15,
+      "period_hours": 24,
+      "comment": "A gentler, broader peak typical for weekend daytimes."
+    }
+  },
+  "burst_profiles": {
+    "no_bursts": {
+      "probability": 0,
+      "comment": "No burst events."
+    },
+    "minor_frequent_glitches": {
+      "probability": 0.15,
+      "min_strength": 1.1,
+      "max_strength": 1.4,
+      "comment": "Small, frequent increases in traffic."
+    },
+    "moderate_occasional_spikes": {
+      "probability": 0.05,
+      "min_strength": 1.5,
+      "max_strength": 2.5,
+      "comment": "Noticeable spikes occurring occasionally."
+    },
+    "major_rare_surges": {
+      "probability": 0.01,
+      "min_strength": 2.0,
+      "max_strength": 4.0,
+      "comment": "Large, infrequent surges in traffic."
+    },
+    "simulated_service_degradation": {
+      "probability": 0.02,
+      "min_strength": 0.1, 
+      "max_strength": 0.5,
+      "duration_ticks_approx": 5, 
+      "comment": "Simulates a temporary drop in capacity/traffic, might need stateful handling for duration."
+    }
+  }
+} 

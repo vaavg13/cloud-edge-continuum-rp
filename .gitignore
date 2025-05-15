@@ -6,6 +6,8 @@ __pycache__/
 test-deployments/
 TestDeployments/
 APPS/
+EXPERIMENTS/
+EXPERIMENT/
 
 # Cursor stuff
 .cursor/
