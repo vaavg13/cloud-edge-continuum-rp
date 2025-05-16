@@ -2,7 +2,7 @@ import subprocess
 import json
 from tabulate import tabulate
 
-namespace = "istio-system"
+namespace = "monitoring"
 
 # Get all pods in the namespace
 pods_json = subprocess.check_output(

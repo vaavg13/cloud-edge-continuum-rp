@@ -217,13 +217,13 @@ def main():
     print("\nFetching Node CPU Usage...")
     df_node_cpu = exporter.get_node_cpu_usage_range(start_time, end_time, step=STEP, rate_window=NODE_RATE_WINDOW)
     save_and_plot_df(df_node_cpu, "Node CPU Usage", "node_cpu_usage", 
-                     group_by_cols=['node'], value_col='cpu_usage_percent', node_ip_to_zone_map=node_ip_zone_map)
+                     group_by_cols=['node'], value_col='cpu_cores_used', node_ip_to_zone_map=node_ip_zone_map)
 
     # 2. Node Memory Usage
     print("\nFetching Node Memory Usage...")
     df_node_mem = exporter.get_node_memory_usage_range(start_time, end_time, step=STEP)
     save_and_plot_df(df_node_mem, "Node Memory Usage", "node_memory_usage", 
-                     group_by_cols=['node'], value_col='memory_usage_percent', node_ip_to_zone_map=node_ip_zone_map)
+                     group_by_cols=['node'], value_col='memory_working_set_bytes', node_ip_to_zone_map=node_ip_zone_map)
 
     # 3. Pod CPU Usage
     print("\nFetching Pod CPU Usage...")

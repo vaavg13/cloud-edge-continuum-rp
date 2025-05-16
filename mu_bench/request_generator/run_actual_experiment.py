@@ -37,7 +37,7 @@ APP_DEFINITIONS = [
 
 # 2. Define Locust Runtime Parameters
 LOCUST_RUNTIME_PARAMS = {
-    "max_total_users": 10,       # Max users controlled by the GlobalUserCountShape
+    "max_total_users": 30,       # Max users controlled by the GlobalUserCountShape
     "spawn_rate": 4,             # Spawn rate for the GlobalUserCountShape
     "run_duration_seconds": 60*60, # Actual wall-clock time the test will run (e.g., 3 minutes)
     "simulated_period_seconds": 24 * 3600 # Traffic patterns will cycle through a simulated 24-hour period

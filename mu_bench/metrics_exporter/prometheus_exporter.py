@@ -81,7 +81,7 @@ class PrometheusExporter:
 
     def get_node_cpu_usage_range(self, start_time, end_time, step="1m", rate_window="1m", instance_label_name='node'):
         """ Fetches time-series of average CPU usage percentage per node. """
-        query = f'(1 - avg by (instance) (rate(node_cpu_seconds_total{{mode="idle"}}[{rate_window}]))) * 100'
+        query = f'sum by (instance) (rate(container_cpu_usage_seconds_total{{image!="", container!="POD"}}[{rate_window}]))'
         data = self._query_prometheus(query, is_range_query=True, start_time=start_time, end_time=end_time, step=step)
         flat_data = []
         if data and data.get('status') == 'success' and data['data']['result']:
@@ -91,43 +91,32 @@ class PrometheusExporter:
                     flat_data.append({
                         'timestamp': datetime.fromtimestamp(float(ts)),
                         instance_label_name: node_id,
-                        'cpu_usage_percent': round(float(val_str), 2)
+                        'cpu_cores_used': round(float(val_str), 3)
                     })
         elif data:
              print(f"Node CPU usage query failed or returned no data: Status {data.get('status')}, Error {data.get('errorType')}, {data.get('error')}")
-        return pd.DataFrame(flat_data) if flat_data else pd.DataFrame(columns=['timestamp', instance_label_name, 'cpu_usage_percent'])
+        return pd.DataFrame(flat_data) if flat_data else pd.DataFrame(columns=['timestamp', instance_label_name, 'cpu_cores_used'])
 
     def get_node_memory_usage_range(self, start_time, end_time, step="1m", instance_label_name='node'):
-        """ Fetches time-series of memory usage percentage per node. """
-        query_available = f'(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100'
-        query_fallback = f'(1 - ((node_memory_MemFree_bytes + node_memory_Cached_bytes + node_memory_Buffers_bytes) / node_memory_MemTotal_bytes)) * 100'
+        """ Fetches time-series of memory working set in bytes per node. """
+        query = f'sum by (instance) (container_memory_working_set_bytes{{image!="", container!="POD"}})'
+        
         flat_data = []
-        data = self._query_prometheus(query_available, is_range_query=True, start_time=start_time, end_time=end_time, step=step)
-        processed_successfully = False
+        data = self._query_prometheus(query, is_range_query=True, start_time=start_time, end_time=end_time, step=step)
+        
         if data and data.get('status') == 'success' and data['data']['result']:
-            processed_successfully = True
             for item in data['data']['result']:
                 node_id = item['metric'].get('instance', 'unknown_instance').split(':')[0]
                 for ts, val_str in item['values']:
                     flat_data.append({
                         'timestamp': datetime.fromtimestamp(float(ts)),
                         instance_label_name: node_id,
-                        'memory_usage_percent': round(float(val_str), 2)
+                        'memory_working_set_bytes': int(float(val_str))
                     })
-        if not processed_successfully:
-            data = self._query_prometheus(query_fallback, is_range_query=True, start_time=start_time, end_time=end_time, step=step)
-            if data and data.get('status') == 'success' and data['data']['result']:
-                for item in data['data']['result']:
-                    node_id = item['metric'].get('instance', 'unknown_instance').split(':')[0]
-                    for ts, val_str in item['values']:
-                        flat_data.append({
-                            'timestamp': datetime.fromtimestamp(float(ts)),
-                            instance_label_name: node_id,
-                            'memory_usage_percent': round(float(val_str), 2)
-                        })
-            elif data :
-                print(f"Node Memory usage query (fallback) also failed or returned no data: Status {data.get('status')}, Error {data.get('errorType')}, {data.get('error')}")
-        return pd.DataFrame(flat_data) if flat_data else pd.DataFrame(columns=['timestamp', instance_label_name, 'memory_usage_percent'])
+        elif data:
+            print(f"Node Memory usage query failed or returned no data: Status {data.get('status')}, Error {data.get('errorType')}, {data.get('error')}")
+            
+        return pd.DataFrame(flat_data) if flat_data else pd.DataFrame(columns=['timestamp', instance_label_name, 'memory_working_set_bytes'])
 
     def get_pod_cpu_usage_range(self, start_time, end_time, step="1m", rate_window="1m", 
                                 namespace_label_name='namespace', pod_label_name='pod'):
