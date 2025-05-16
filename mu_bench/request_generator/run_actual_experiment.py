@@ -24,7 +24,7 @@ APP_DEFINITIONS = [
             },
             {
                 "path": "/s0-edge-site-2", 
-                "site_base_scale": 0.9, 
+                "site_base_scale": 0.3, 
                 "site_random_factor_range": (0.9, 1.1),
                 "pattern_config_refs": { 
                     "seasonality_refs": ["evening_low_steady", "night_minimal"], 
@@ -37,7 +37,7 @@ APP_DEFINITIONS = [
 
 # 2. Define Locust Runtime Parameters
 LOCUST_RUNTIME_PARAMS = {
-    "max_total_users": 40,       # Max users controlled by the GlobalUserCountShape
+    "max_total_users": 10,       # Max users controlled by the GlobalUserCountShape
     "spawn_rate": 4,             # Spawn rate for the GlobalUserCountShape
     "run_duration_seconds": 60*60, # Actual wall-clock time the test will run (e.g., 3 minutes)
     "simulated_period_seconds": 24 * 3600 # Traffic patterns will cycle through a simulated 24-hour period
