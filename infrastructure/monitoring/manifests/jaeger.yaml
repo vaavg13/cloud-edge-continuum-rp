@@ -18,6 +18,8 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "14269"
     spec:
+      nodeSelector:
+        topology.kubernetes.io/zone: cloud
       containers:
         - name: jaeger
           image: "docker.io/jaegertracing/all-in-one:1.35"

@@ -143,7 +143,7 @@ apply_node_resource_limits() {
         NODE_MEM_GB_RAW=$(jq -r ".[${i}].memory_capacity_gb" "$SCRIPT_ABSOLUTE_DIR/nodes.json")
         
         # Ensure NODE_MEM_GB_RAW is treated as a number for arithmetic
-        NODE_MEM_GB=$(echo "$NODE_MEM_GB_RAW" | awk '{print int($1)}') # more robust way to ensure it's an integer
+        NODE_MEM_GB=$(echo "$NODE_MEM_GB_RAW" | awk '{print int($1)}')
         NODE_MEM_MB=$((NODE_MEM_GB * 1024))
 
         CONTAINER_NAME="k3d-${CLUSTER_NAME}-agent-$i"

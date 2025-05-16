@@ -41,7 +41,12 @@ install_monitoring_stack() {
     kubectl create namespace monitoring || true
     helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
     helm repo update
-    helm install prometheus prometheus-community/kube-prometheus-stack -n monitoring
+    helm install prometheus prometheus-community/kube-prometheus-stack -n monitoring \
+      --set prometheus.prometheusSpec.nodeSelector."topology\.kubernetes\.io/zone"=cloud \
+      --set alertmanager.alertmanagerSpec.nodeSelector."topology\.kubernetes\.io/zone"=cloud \
+      --set grafana.nodeSelector."topology\.kubernetes\.io/zone"=cloud \
+      --set prometheusOperator.nodeSelector."topology\.kubernetes\.io/zone"=cloud \
+      --set kubeStateMetrics.nodeSelector."topology\.kubernetes\.io/zone"=cloud
 
     apply_yaml "prometheus-nodeport.yaml" "monitoring" true
     apply_yaml "grafana-nodeport.yaml" "monitoring" true
@@ -51,8 +56,11 @@ install_monitoring_stack() {
     helm repo add istio https://istio-release.storage.googleapis.com/charts
     helm repo update
     helm install istio-base istio/base -n istio-system
-    helm install istiod istio/istiod -n istio-system --set global.proxy.tracer=zipkin --wait
-    helm install istio-ingressgateway istio/gateway -n istio-system
+    helm install istiod istio/istiod -n istio-system \
+      --set pilot.nodeSelector."topology\.kubernetes\.io/zone"=cloud \
+      --set global.proxy.tracer=zipkin --wait
+    helm install istio-ingressgateway istio/gateway -n istio-system \
+      --set nodeSelector."topology\.kubernetes\.io/zone"=cloud
 
     kubectl label namespace default istio-injection=enabled --overwrite
 
@@ -66,6 +74,7 @@ install_monitoring_stack() {
     helm repo add kiali https://kiali.org/helm-charts
     helm repo update
     helm install -n istio-system -f "$MANIFEST_DIR/kiali-values.yaml" kiali-server kiali/kiali-server
+
     apply_yaml "kiali-nodeport.yaml" "" true
 }
 

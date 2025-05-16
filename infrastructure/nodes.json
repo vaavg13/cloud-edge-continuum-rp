@@ -27,23 +27,19 @@
   {
     "name": "edge-node-1-site-1",
     "zone": "edge-site-1",
-    "cpu_capacity": "1",
-    "memory_capacity_gb": "1"
+    "cpu_capacity": "2",
+    "memory_capacity_gb": "2"
   },
   {
     "name": "edge-node-0-site-2",
     "zone": "edge-site-2",
-    "cpu_capacity": "1",
-    "memory_capacity_gb": "1"
+    "cpu_capacity": "2",
+    "memory_capacity_gb": "2"
   },
   {
     "name": "edge-node-1-site-2",
     "zone": "edge-site-2",
-    "cpu_capacity": "1",
-    "memory_capacity_gb": "1",
-    "network_restrictions": {
-      "rate": "2mbps",
-      "delay": "50ms"
-    }
+    "cpu_capacity": "2",
+    "memory_capacity_gb": "2"
   }
 ] 

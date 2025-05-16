@@ -8,6 +8,7 @@ TestDeployments/
 APPS/
 EXPERIMENTS/
 EXPERIMENT/
+DATA/
 
 # Cursor stuff
 .cursor/
