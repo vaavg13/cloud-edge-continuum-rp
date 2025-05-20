@@ -9,7 +9,7 @@ from locust import LoadTestShape
 from locust.env import Environment
 from locust.stats import stats_printer
 from locust.log import setup_logging
-from locustfile import configure_locust_users, USER_CLASSES
+from .locustfile import configure_locust_users, USER_CLASSES
 
 LOG_LEVEL = os.getenv("LOCUST_LOG_LEVEL", "INFO").upper()
 setup_logging(LOG_LEVEL, None)

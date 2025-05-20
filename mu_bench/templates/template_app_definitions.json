@@ -1,0 +1,27 @@
+[
+    {
+        "name": "app-edge",
+        "user_weight": 2,
+        "port": 31115,
+        "targets": [
+            {
+                "path": "/s0-edge-site-1",
+                "site_base_scale": 1.2,
+                "site_random_factor_range": [0.8, 1.2],
+                "pattern_config_refs": {
+                    "seasonality_refs": ["office_hours_peak"],
+                    "burst_refs": ["moderate_occasional_spikes"]
+                }
+            },
+            {
+                "path": "/s0-edge-site-2",
+                "site_base_scale": 0.3,
+                "site_random_factor_range": [0.9, 1.1],
+                "pattern_config_refs": {
+                    "seasonality_refs": ["evening_low_steady", "night_minimal"],
+                    "burst_refs": ["minor_frequent_glitches"]
+                }
+            }
+        ]
+    }
+] 

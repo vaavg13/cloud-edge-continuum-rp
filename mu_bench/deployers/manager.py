@@ -57,10 +57,24 @@ class K8sDeploymentManager:
         self.nfs_conf = dict()  # Placeholder for NFS config if needed
 
     def _prepare_deployment_dir(self):
-        # Only create the yamls folder inside the existing output_dir
-        yamls_dir = os.path.join(self.output_dir, "yamls")
-        os.makedirs(yamls_dir, exist_ok=True)
-        self.deployment_dir = self.output_dir
+        # Define the specific path for YAML files
+        yamls_target_dir = os.path.join(self.output_dir, "yamls")
+
+        # Clean up the entire yamls directory if it exists
+        if os.path.exists(yamls_target_dir):
+            print_status(f"Removing existing directory {yamls_target_dir} before YAML generation...")
+            try:
+                shutil.rmtree(yamls_target_dir)
+                print_status(f"Successfully removed {yamls_target_dir}.")
+            except OSError as e:
+                print_error(f"Error removing directory {yamls_target_dir}: {e}. Proceeding to recreate.")
+        
+        # Ensure the directory exists for the YAML builder
+        # This will create it if it was removed or didn't exist initially
+        os.makedirs(yamls_target_dir, exist_ok=True)
+        print_status(f"Ensured YAML directory {yamls_target_dir} exists.")
+        
+        self.deployment_dir = self.output_dir # This is the root for workmodel.json, k8parameters.json
         # Save deployment parameters for reproducibility
         params = {
             "prefix_yaml_file": self.prefix_yaml_file,
