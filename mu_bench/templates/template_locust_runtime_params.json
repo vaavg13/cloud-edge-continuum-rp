@@ -1,7 +1,0 @@
-{
-    "target_host": "http://172.23.0.5:31115",
-    "max_total_users": 30,
-    "spawn_rate": 4,
-    "run_duration_seconds": 3600,
-    "simulated_period_seconds": 86400
-} 

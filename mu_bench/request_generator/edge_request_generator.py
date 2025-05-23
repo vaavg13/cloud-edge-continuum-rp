@@ -1,9 +1,3 @@
-"""
-Simplified Edge Request Generator
-
-A dramatically simplified approach for edge computing load testing that matches
-real edge infrastructure patterns. Focuses on edge sites and port-based app differentiation.
-"""
 import time
 import logging
 import gevent

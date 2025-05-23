@@ -1,10 +1,3 @@
-"""
-Simplified Edge Traffic Calculator
-
-This calculator provides a much simpler approach for calculating traffic patterns
-specifically for edge computing scenarios. Instead of complex seasonality + burst
-combinations, it uses realistic edge site patterns.
-"""
 import random
 import math
 from typing import Dict, Any
@@ -13,12 +6,6 @@ from .edge_profiles import get_edge_patterns, get_pattern
 
 
 class EdgeTrafficCalculator:
-    """
-    Simplified calculator for edge computing traffic patterns.
-    
-    Much simpler than the original TrafficPatternCalculator - focuses on 
-    realistic edge site characteristics instead of complex pattern combinations.
-    """
     
     def __init__(self):
         """Initialize with edge patterns."""

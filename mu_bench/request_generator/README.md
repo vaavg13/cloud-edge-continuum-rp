@@ -58,8 +58,9 @@ success = generator.run_edge_experiment(
 ### Generated Endpoints
 
 The above configuration automatically generates requests to:
+
 - `http://172.23.0.5:31116/s0-edge-site-1`
-- `http://172.23.0.5:31116/s0-edge-site-2` 
+- `http://172.23.0.5:31116/s0-edge-site-2`
 - `http://172.23.0.5:31116/s0-edge-site-3`
 - `http://172.23.0.5:31115/s0-edge-site-1`
 - `http://172.23.0.5:31115/s0-edge-site-2`
