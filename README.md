@@ -73,7 +73,7 @@ To run a basic experiment:
 
 ### 1. Infrastructure Management (`/infrastructure`)
 
-- K3d Kubernetes cluster setup 
+- K3d Kubernetes cluster setup
 - Node volatility simulation (failures, throttling)
 - Resource constraints implementation
 - Monitoring Instalation
@@ -173,3 +173,50 @@ python3 -m mu_bench.cli.undeploy_app --app-dir APPS/myapp
 - Enable user location-aware routing and realistic cloud-edge placement experiments
 - Refactor or remove deprecated components (notably `mu_bench/add_ons/`)
 - Expand documentation and add more example applications and experiment templates
+
+## Final library form --> WIP
+
+```python
+        import mubench
+
+        # 1. Initialize an experiment directory (replaces manual APPS/app-edge creation)
+        exp_manager = mubench.ExperimentManager(base_dir="./my_experiments")
+        exp_run_path = exp_manager.new_run("experiment_001")
+        # This would create ./my_experiments/experiment_001 and potentially
+        # copy default template files for emulation.json, deployment.json, traffic.json etc.
+
+        # 2. Load or define models
+        emulation_model = mubench.models.load_emulation_model(f"{exp_run_path}/emulation.json")
+        deployment_model = mubench.models.load_deployment_model(f"{exp_run_path}/deployment.json")
+        # Or:
+        # emulation_model = mubench.generators.generate_complex_app(...)
+        # deployment_model = mubench.strategies.generate_edge_deployment(emulation_model)
+
+
+        # 3. Get a deployer instance (uses the new models)
+        kube_config_path = "~/.kube/config" # example
+        deployer = mubench.orchestration.KubernetesDeployer(
+            emulation_model=emulation_model,
+            deployment_model=deployment_model,
+            kube_config=kube_config_path
+        )
+
+        # 4. Deploy
+        deployer.deploy_services() # Generates YAMLs to exp_run_path/generated_yamls, then applies
+
+        # 5. Traffic Generation (example)
+        # traffic_config = mubench.load_traffic_config(f"{exp_run_path}/traffic.json")
+        # traffic_gen = mubench.generation.TrafficGenerator(emulation_model, deployer.get_service_endpoints())
+        # traffic_gen.start()
+
+        # 6. Metrics (example)
+        # metrics_collector = mubench.metrics.MetricsCollector(deployment_model, deployer.get_deployed_namespaces())
+        # metrics_collector.start(output_dir=f"{exp_run_path}/metrics")
+
+        # ... run experiment ...
+
+        # 7. Cleanup
+        # metrics_collector.stop()
+        # traffic_gen.stop()
+        # deployer.teardown_services()
+```

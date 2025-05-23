@@ -20,13 +20,10 @@ case "$1" in
     ;;
   run-experiment)
     shift
-    # Ensure that the cecemulator conda environment is activated if necessary
-    # For example: conda activate cecemulator
     python -m mu_bench.cli.run_experiment "$@"
     ;;
   scaffold-experiment)
     shift
-    # Ensure that the cecemulator conda environment is activated if necessary
     python mu_bench/cli/scaffold_experiment.py "$@"
     ;;
   *)
