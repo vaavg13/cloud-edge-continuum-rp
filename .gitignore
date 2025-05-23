@@ -9,6 +9,7 @@ APPS/
 EXPERIMENTS/
 EXPERIMENT/
 DATA/
+workmodel_prompt_template.py
 
 # Cursor stuff
 .cursor/
