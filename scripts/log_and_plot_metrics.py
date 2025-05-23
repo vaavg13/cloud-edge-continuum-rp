@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import subprocess
 import json
+import time
 
 # Adjust path to import PrometheusExporter from the parent directory
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -86,6 +87,13 @@ class DataPlotter:
 
         return plot_df, actual_value_col
 
+    def _convert_unix_to_datetime(self, timestamps):
+        """Convert Unix timestamps to datetime objects for plotting"""
+        if isinstance(timestamps, pd.Series):
+            return pd.to_datetime(timestamps, unit='s')
+        else:
+            return [datetime.fromtimestamp(ts) for ts in timestamps]
+
     def plot_data(self, df, metric_name, filename_prefix, group_by_cols=None, value_col=None):
         if df is None or df.empty:
             print(f"No data for {metric_name}. Skipping plot.")
@@ -106,7 +114,9 @@ class DataPlotter:
 
             for name, group in prepared_df.groupby(group_by_cols):
                 label_str = self._generate_plot_label(name, group_by_cols)
-                plt.plot(group['timestamp'], group[actual_plot_value_col], marker='o', linestyle='-', label=label_str)
+                # Convert Unix timestamps to datetime for plotting
+                plot_timestamps = self._convert_unix_to_datetime(group['timestamp'])
+                plt.plot(plot_timestamps, group[actual_plot_value_col], marker='o', linestyle='-', label=label_str)
         
         else: # Single line plot if no grouping needed
             if 'timestamp' in df.columns:
@@ -118,7 +128,9 @@ class DataPlotter:
                 
                 col_to_plot = potential_value_cols[0]
                 plot_value_col_name = col_to_plot
-                plt.plot(df['timestamp'], df[col_to_plot], marker='o', linestyle='-')
+                # Convert Unix timestamps to datetime for plotting
+                plot_timestamps = self._convert_unix_to_datetime(df['timestamp'])
+                plt.plot(plot_timestamps, df[col_to_plot], marker='o', linestyle='-')
                 if len(potential_value_cols) > 1:
                     print(f"Warning: Multiple potential value columns for single line plot of {metric_name}. Plotted '{col_to_plot}'.")
             elif not df.index.empty and isinstance(df.index, pd.MultiIndex) and 'timestamp' in df.index.names: # type: ignore
@@ -126,7 +138,9 @@ class DataPlotter:
                 val_cols = [c for c in temp_df.columns if c != 'timestamp' and c not in (df.index.names if df.index.names else [])] # type: ignore
                 if val_cols:
                     plot_value_col_name = val_cols[0]
-                    plt.plot(temp_df['timestamp'], temp_df[val_cols[0]], marker='o', linestyle='-')
+                    # Convert Unix timestamps to datetime for plotting
+                    plot_timestamps = self._convert_unix_to_datetime(temp_df['timestamp'])
+                    plt.plot(plot_timestamps, temp_df[val_cols[0]], marker='o', linestyle='-')
                 else:
                     print(f"Cannot determine columns to plot for {metric_name} (MultiIndex case). Skipping plot.")
                     plt.close()
@@ -210,10 +224,16 @@ def main():
     # --- Initialize Exporter ---
     exporter = PrometheusExporter(prometheus_url=PROMETHEUS_URL, target_namespaces=TARGET_NAMESPACES)
 
-    # --- Define Time Range ---
-    end_time = datetime.now(timezone.utc)
-    start_time = end_time - timedelta(minutes=DURATION_MINUTES)
-    print(f"Fetching data from {start_time.isoformat()} to {end_time.isoformat()} (step: {STEP})")
+    # --- Define Time Range (Unix timestamps) ---
+    end_time_unix = int(time.time())
+    start_time_unix = end_time_unix - (DURATION_MINUTES * 60)
+    
+    # Convert to datetime for display purposes
+    end_time_dt = datetime.fromtimestamp(end_time_unix, tz=timezone.utc)
+    start_time_dt = datetime.fromtimestamp(start_time_unix, tz=timezone.utc)
+    
+    print(f"Fetching data from {start_time_dt.isoformat()} to {end_time_dt.isoformat()} (step: {STEP})")
+    print(f"Unix timestamps: {start_time_unix} to {end_time_unix}")
 
     # --- Fetch Node-IP-Zone Mapping ---
     node_ip_zone_map = get_node_ip_to_zone_map()
@@ -253,7 +273,7 @@ def main():
     # 1. Node CPU Usage
     process_metric(
         exporter.get_node_cpu_usage_range,
-        (start_time, end_time, STEP, NODE_RATE_WINDOW),
+        (start_time_unix, end_time_unix, STEP, NODE_RATE_WINDOW),
         "Node CPU Usage", 
         "node_cpu_usage",
         group_by_cols=['node'], 
@@ -263,7 +283,7 @@ def main():
     # 2. Node Memory Usage
     process_metric(
         exporter.get_node_memory_usage_range,
-        (start_time, end_time, STEP),
+        (start_time_unix, end_time_unix, STEP),
         "Node Memory Usage", 
         "node_memory_usage",
         group_by_cols=['node'], 
@@ -273,7 +293,7 @@ def main():
     # 3. Pod CPU Usage
     process_metric(
         exporter.get_pod_cpu_usage_range,
-        (start_time, end_time, STEP, POD_RATE_WINDOW),
+        (start_time_unix, end_time_unix, STEP, POD_RATE_WINDOW),
         "Pod CPU Usage (Namespaces: {namespaces})", 
         "pod_cpu_usage",
         group_by_cols=['namespace', 'pod'], 
@@ -283,7 +303,7 @@ def main():
     # 4. Pod Memory Usage
     process_metric(
         exporter.get_pod_memory_usage_range,
-        (start_time, end_time, STEP),
+        (start_time_unix, end_time_unix, STEP),
         "Pod Memory Usage (Namespaces: {namespaces})", 
         "pod_memory_usage",
         group_by_cols=['namespace', 'pod'], 
