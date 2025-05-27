@@ -9,7 +9,8 @@ from pathlib import Path
 
 class PrometheusExporter:
     def __init__(self, prometheus_url="http://localhost:9090", target_namespaces=None, 
-                 collection_interval_minutes=10, metrics_step="30s", output_dir="metrics_data", verbose=True):
+                 collection_interval_minutes=10, metrics_step="30s", output_dir="metrics_data", verbose=True, 
+                 create_output_dir=True):
         """
         Initializes the PrometheusExporter with interval-based collection.
 
@@ -22,6 +23,8 @@ class PrometheusExporter:
             metrics_step (str): Step interval for Prometheus queries (e.g., "30s", "1m").
             output_dir (str): Directory to store CSV files.
             verbose (bool): Whether to print status messages and progress information.
+            create_output_dir (bool): Whether to create the output directory immediately. If False,
+                                    directory creation is deferred until needed.
         """
         self.prometheus_url = prometheus_url
         if not self.prometheus_url.startswith(("http://", "https://")):
@@ -41,7 +44,10 @@ class PrometheusExporter:
         self.metrics_step = metrics_step
         self.verbose = verbose
         self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Only create directory if requested
+        if create_output_dir:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # Threading control
         self._collection_thread = None
@@ -57,8 +63,9 @@ class PrometheusExporter:
             'istio_latency': self.output_dir / 'istio_latency.csv'
         }
         
-        # Initialize CSV files with headers
-        self._initialize_csv_files()
+        # Initialize CSV files with headers (only if directory was created)
+        if create_output_dir:
+            self._initialize_csv_files()
 
     def _initialize_csv_files(self):
         """Initialize CSV files with appropriate headers."""
