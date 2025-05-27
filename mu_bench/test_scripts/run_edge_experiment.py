@@ -11,33 +11,33 @@ from mu_bench.experiment_manager import EdgeExperimentManager
 
 
 def get_edge_config():
-    """Get the edge computing configuration."""
+    """Configuration with multiple apps to demonstrate desynchronization."""
     return {
         "base_host": "172.23.0.5",
         "apps": [
             {
-                "name": "app-1",
+                "name": "iot-sensor-app",  # Different name creates different hash
                 "port": 31116,
                 "traffic_weight": 1.0,
-                "wait_time": {"min": 0.5, "max": 2.0}
+                "wait_time": {"min": 0.3, "max": 1.5}
             },
             {
-                "name": "app-2", 
+                "name": "web-dashboard-app",  # Different name = different behavior
                 "port": 31115,
-                "traffic_weight": 0.8,
-                "wait_time": {"min": 1.0, "max": 3.0}
+                "traffic_weight": 0.9,
+                "wait_time": {"min": 0.8, "max": 2.5}
             }
         ],
         "edge_sites": {
             "edge-site-1": {
                 "pattern": "urban_peak",
-                "description": "Primary urban edge site",
+                "description": "Urban site with business peaks",
                 "traffic_weight": 1.0
             },
             "edge-site-2": {
-                "pattern": "suburban_steady",
-                "description": "Secondary suburban edge site", 
-                "traffic_weight": 0.7
+                "pattern": "suburban_steady", 
+                "description": "Suburban site with steady traffic",
+                "traffic_weight": 0.8
             }
         }
     }
@@ -51,7 +51,7 @@ def main():
     # Note: output_dir will be set by EdgeExperimentManager to be inside the experiment directory
     prometheus_logger = PrometheusExporter(
         prometheus_url="http://localhost:9090",
-        target_namespaces=["app-edge", "app-edge-2"],
+        target_namespaces=["app-edge", "app-edge-2", "app-edge-3"],
         collection_interval_minutes=15,
         metrics_step="30s",
         output_dir="metrics",  # Will be overridden by EdgeExperimentManager

@@ -12,7 +12,7 @@ The MuBench visualization module provides comprehensive analysis capabilities fo
 
 The visualization system is organized into focused modules:
 
-```
+```file
 mu_bench/visualization/
 ├── __init__.py           # Main module exports
 ├── README.md            # This documentation
@@ -130,17 +130,20 @@ net_viz = analyze_network_only('DATA/metrics/')
 ### Comprehensive Metrics Support
 
 #### Node-level Metrics
+
 - CPU usage analysis with correlation matrices
 - Memory usage analysis
 - Resource utilization overview
 - Cross-node correlation analysis
 
 #### Pod-level Metrics
+
 - CPU usage by namespace and individual pods
 - Memory usage with CPU correlation
 - Pod resource analysis by namespace
 
 #### Network Metrics
+
 - Istio service latency (P95) analysis
 - Service mesh performance analysis
 - Latency anomaly detection
@@ -178,12 +181,14 @@ The module expects the following CSV files in the metrics directory:
 ### Required Columns
 
 #### Node Metrics
+
 - `timestamp`: Unix timestamp
 - `node`: Node IP address
 - `cpu_cores_used`: CPU cores used
 - `memory_working_set_bytes`: Memory usage in bytes
 
 #### Pod Metrics
+
 - `timestamp`: Unix timestamp
 - `namespace`: Kubernetes namespace
 - `pod`: Pod name
@@ -191,6 +196,7 @@ The module expects the following CSV files in the metrics directory:
 - `memory_usage_bytes`: Memory usage in bytes
 
 #### Istio Metrics
+
 - `timestamp`: Unix timestamp
 - `namespace`: Kubernetes namespace
 - `pod`: Service/pod name
@@ -199,12 +205,14 @@ The module expects the following CSV files in the metrics directory:
 ## Dependencies
 
 ### Required Packages
+
 - `pandas`: Data manipulation and analysis
 - `matplotlib`: Plotting library
 - `seaborn`: Statistical data visualization
 - `numpy`: Numerical computing
 
 ### Optional Dependencies
+
 - `kubectl`: For automatic zone detection (recommended)
 
 ## Configuration
@@ -222,6 +230,7 @@ viz = MetricsVisualizer(
 ### Visualization Settings
 
 The module uses seaborn styling by default:
+
 - Style: `seaborn-v0_8`
 - Color palette: `husl`
 - Figure sizes are configurable for each plot type
@@ -305,6 +314,7 @@ print("Zone info:", viz.get_zone_info())
 If you're migrating from the original monolithic script:
 
 1. Replace import:
+
    ```python
    # Old
    from scripts.metrics_visualizer_notebook import MetricsVisualizerNotebook
@@ -314,6 +324,7 @@ If you're migrating from the original monolithic script:
    ```
 
 2. Update class name (optional):
+
    ```python
    # Old
    viz = MetricsVisualizerNotebook('DATA/metrics/')
@@ -331,4 +342,4 @@ If you're migrating from the original monolithic script:
 - **Performance**: Better memory management and faster loading
 - **Features**: New advanced analysis capabilities
 - **Testing**: Individual components can be tested separately
-- **Documentation**: Better organized and documented code 
+- **Documentation**: Better organized and documented code
