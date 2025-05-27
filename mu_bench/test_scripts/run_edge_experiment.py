@@ -48,13 +48,15 @@ def main():
     print("🌐 Edge Computing Experiment")
     
     # Create prometheus logger (every 15 minutes)
+    # Note: output_dir will be set by EdgeExperimentManager to be inside the experiment directory
     prometheus_logger = PrometheusExporter(
         prometheus_url="http://localhost:9090",
-        target_namespaces=["default", "mu-bench"],
+        target_namespaces=["app-edge", "app-edge-2"],
         collection_interval_minutes=15,
         metrics_step="30s",
-        output_dir="metrics",
-        verbose=True
+        output_dir="metrics",  # Will be overridden by EdgeExperimentManager
+        verbose=True,
+        create_output_dir=False  # Don't create directory yet - EdgeExperimentManager will handle it
     )
     
     # Create traffic generator
