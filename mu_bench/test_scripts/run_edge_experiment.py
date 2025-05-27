@@ -72,7 +72,7 @@ def main():
     edge_config = get_edge_config()
     
     # Ask for confirmation
-    response = input("\n🤔 Start 7-hour experiment (simulating 24h)? (y/N): ")
+    response = input("\n🤔 Start 1-hour experiment (simulating 24h)? (y/N): ")
     if response.lower() != 'y':
         print("💭 Experiment cancelled.")
         return
@@ -80,9 +80,9 @@ def main():
     # Run experiment
     success = experiment_manager.run_experiment(
         edge_config=edge_config,
-        duration_hours=7,        # Real time: 7 hours
+        duration_hours=1,        # Real time: 7 hours
         simulated_hours=24,      # Simulated time: 24 hours
-        max_users=15,
+        max_users=40,
         spawn_rate=3
     )
     
