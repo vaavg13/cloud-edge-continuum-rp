@@ -4,7 +4,7 @@ import json
 from jinja2 import Environment, FileSystemLoader
 from copy import deepcopy
 from collections import defaultdict
-from .expander import expand_workmodel
+from ..expander import expand_workmodel
 
 
 def indent_block(text, spaces=2):

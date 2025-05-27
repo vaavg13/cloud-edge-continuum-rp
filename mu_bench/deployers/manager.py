@@ -1,7 +1,7 @@
 """
 K8sDeploymentManager: Main API for managing K8s microservice deployments.
 """
-from .builder import K8sYamlBuilder
+from .yaml_based.builder import K8sYamlBuilder
 from .deployer import K8sYamlDeployer
 import os
 import shutil
