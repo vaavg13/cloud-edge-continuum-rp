@@ -95,7 +95,7 @@ class MetricsVisualizer:
         """Access to the node IP to zone mapping."""
         return self.data_loader.node_ip_to_zone_map
     
-    # Main analysis methods (maintaining original API)
+    # Main analysis methods
     def show_summary(self):
         """Display a comprehensive summary of the loaded data."""
         print("=" * 60)
@@ -201,55 +201,7 @@ class MetricsVisualizer:
         """Create and display edge requests analysis plots."""
         return self.edge_requests_viz.plot_analysis(figsize)
     
-    # Unified analysis methods
-    def plot_all(self, figsize=(16, 12)):
-        """Generate and display all available plots."""
-        print("🔄 Generating comprehensive metrics analysis...\n")
-        
-        self.show_summary()
-        
-        # Node-level analysis
-        if self.data_loader.has_data('node_cpu'):
-            print("\n📊 Node CPU Usage Analysis:")
-            self.plot_cpu_analysis(figsize)
-        
-        if self.data_loader.has_data('node_memory'):
-            print("\n💾 Node Memory Usage Analysis:")
-            self.plot_memory_analysis(figsize)
-        
-        if self.data_loader.has_data('node_cpu') and self.data_loader.has_data('node_memory'):
-            print("\n🔄 Node Resource Utilization Overview:")
-            self.plot_resource_overview((18, 12))
-            
-            print("\n🌍 Node Sites/Zones Correlation Analysis:")
-            self.plot_sites_analysis(figsize)
-        
-        # Pod-level analysis
-        if self.data_loader.has_data('pod_cpu'):
-            print("\n📦 Pod CPU Usage Analysis:")
-            self.plot_pod_cpu_analysis((18, 14))
-        
-        if self.data_loader.has_data('pod_memory'):
-            print("\n💾 Pod Memory Usage Analysis:")
-            self.plot_pod_memory_analysis((18, 14))
-        
-        if self.data_loader.has_data('pod_cpu') and self.data_loader.has_data('pod_memory'):
-            print("\n🔄 Pod Sites/Namespace Analysis:")
-            self.plot_pod_sites_analysis(figsize)
-        
-        # Service-level analysis
-        if self.data_loader.has_data('istio_latency'):
-            print("\n🌐 Istio Service Latency Analysis:")
-            self.plot_istio_latency_analysis((18, 14))
-            
-            print("\n🔬 Advanced Service Mesh Analysis:")
-            self.plot_service_mesh_analysis((20, 16))
-        
-        # Edge requests analysis
-        if self.edge_requests_viz.requests_data is not None:
-            print("\n🚀 Edge Requests Analysis:")
-            self.plot_edge_requests_analysis((20, 16))
-    
+    # Summary methods
     def get_data_summary(self):
         """Return a summary of the loaded data as a dictionary."""
         summary = {}
@@ -285,55 +237,6 @@ class MetricsVisualizer:
             summary['edge_requests'] = self.edge_requests_viz.get_summary_stats()
         
         return summary
-    
-    # Advanced analysis methods (new capabilities)
-    def plot_cpu_analysis_advanced(self, figsize=(18, 16)):
-        """Create advanced CPU analysis with both node and pod level insights."""
-        if not (self.data_loader.has_data('node_cpu') or self.data_loader.has_data('pod_cpu')):
-            print("❌ No CPU data available for advanced analysis")
-            return None
-        
-        print("🔄 Generating advanced CPU analysis...")
-        
-        if self.data_loader.has_data('node_cpu'):
-            print("\n📊 Node-level CPU Analysis:")
-            node_fig = self.plot_cpu_analysis(figsize)
-        
-        if self.data_loader.has_data('pod_cpu'):
-            print("\n📦 Pod-level CPU Analysis:")
-            pod_fig = self.plot_pod_cpu_analysis((18, 14))
-    
-    def plot_memory_analysis_advanced(self, figsize=(18, 16)):
-        """Create advanced memory analysis with both node and pod level insights."""
-        if not (self.data_loader.has_data('node_memory') or self.data_loader.has_data('pod_memory')):
-            print("❌ No memory data available for advanced analysis")
-            return None
-        
-        print("🔄 Generating advanced memory analysis...")
-        
-        if self.data_loader.has_data('node_memory'):
-            print("\n💾 Node-level Memory Analysis:")
-            node_fig = self.plot_memory_analysis(figsize)
-        
-        if self.data_loader.has_data('pod_memory'):
-            print("\n📦 Pod-level Memory Analysis:")
-            pod_fig = self.plot_pod_memory_analysis((18, 14))
-    
-    def plot_network_analysis_advanced(self, figsize=(20, 16)):
-        """Create advanced network analysis with service mesh insights."""
-        if not self.data_loader.has_data('istio_latency'):
-            print("❌ No network data available for advanced analysis")
-            return None
-        
-        print("🔄 Generating advanced network analysis...")
-        
-        print("\n🌐 Basic Istio Analysis:")
-        basic_fig = self.plot_istio_latency_analysis((18, 14))
-        
-        print("\n🔬 Advanced Service Mesh Analysis:")
-        advanced_fig = self.plot_service_mesh_analysis(figsize)
-        
-        return advanced_fig
     
     # Utility methods
     def has_data(self, metric_type):

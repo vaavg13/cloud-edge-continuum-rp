@@ -17,16 +17,22 @@ def get_edge_config():
         "apps": [
             {
                 "name": "app-edge",  # Different name creates different hash
-                "port": 31116,
-                "traffic_weight": 1,
-                "wait_time": {"min": 0.3, "max": 1.5}
-            },
-            {
-                "name": "app-edge-2",  # Different name = different behavior
                 "port": 31115,
-                "traffic_weight": 0.9,
-                "wait_time": {"min": 0.8, "max": 2.5}
-            }
+                "traffic_weight": 1,
+                "wait_time": {"min": 0.7, "max": 1.5}
+            },
+            # {
+            #     "name": "app-edge-2",  # Different name = different behavior
+            #     "port": 31116,
+            #     "traffic_weight": 0.9,
+            #     "wait_time": {"min": 0.8, "max": 2.5}
+            # },
+            # {
+            #     "name": "app-edge-3",  # Different name = different behavior
+            #     "port": 31117,
+            #     "traffic_weight": 0.9,
+            #     "wait_time": {"min": 0.8, "max": 2.5}
+            # }
         ],
         "edge_sites": {
             "edge-site-1": {
@@ -51,7 +57,7 @@ def main():
     # Note: output_dir will be set by EdgeExperimentManager to be inside the experiment directory
     prometheus_logger = PrometheusExporter(
         prometheus_url="http://localhost:9090",
-        target_namespaces=["app-edge", "app-edge-2"],
+        target_namespaces=["app-edge"],
         collection_interval_minutes=5,
         metrics_step="30s",
         output_dir="metrics",  # Will be overridden by EdgeExperimentManager
