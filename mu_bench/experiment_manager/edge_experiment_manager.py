@@ -86,7 +86,7 @@ class EdgeExperimentManager:
         signal.signal(signal.SIGTERM, signal_handler)
     
     def run_experiment(self, edge_config, duration_hours=7, simulated_hours=24, 
-                      max_users=15, spawn_rate=3):
+                      max_users=15, spawn_rate=3, enable_request_logging=True):
         """
         Run the complete experiment with metrics collection.
         
@@ -96,6 +96,7 @@ class EdgeExperimentManager:
             simulated_hours (int): Simulated time period in hours
             max_users (int): Maximum number of concurrent users
             spawn_rate (int): Rate of spawning users
+            enable_request_logging (bool): Whether to log individual requests for visualization
             
         Returns:
             bool: True if experiment completed successfully
@@ -123,6 +124,11 @@ class EdgeExperimentManager:
             # Start the edge load test
             self.logger.info("🚀 Starting edge load test...")
             
+            # Setup request logging file path
+            request_log_file = None
+            if enable_request_logging:
+                request_log_file = str(self.output_dir / "edge_requests.csv")
+            
             self.is_running = True
             
             success = self.traffic_generator.run_edge_experiment(
@@ -131,7 +137,9 @@ class EdgeExperimentManager:
                 spawn_rate=spawn_rate,
                 run_duration_seconds=duration_hours * 60 * 60,
                 simulated_period_seconds=simulated_hours * 60 * 60,
-                log_level="INFO"
+                log_level="INFO",
+                enable_request_logging=enable_request_logging,
+                request_log_file=request_log_file
             )
             
             self.is_running = False
@@ -222,6 +230,13 @@ class EdgeExperimentManager:
         self.logger.info(f"\n📁 All experiment data saved to: {self.output_dir}")
         self.logger.info(f"📝 Experiment log: {self.output_dir / f'{self.experiment_name}.log'}")
         self.logger.info(f"📊 Metrics data: {self.output_dir / 'metrics'}")
+        
+        # Show request log file if available
+        request_log_file = self.traffic_generator.get_request_log_file()
+        if request_log_file and request_log_file.exists():
+            file_size = request_log_file.stat().st_size / 1024  # Size in KB
+            self.logger.info(f"📈 Request log: {request_log_file} ({file_size:.1f} KB)")
+            self.logger.info("   Use this file for traffic pattern visualization and analysis")
 
     @property
     def output_directory(self):

@@ -12,6 +12,7 @@ from .cpu_visualizer import CPUVisualizer, PodCPUVisualizer
 from .memory_visualizer import MemoryVisualizer, PodMemoryVisualizer, ResourceOverviewVisualizer
 from .network_visualizer import IstioLatencyVisualizer, NetworkAnalysisVisualizer, ServiceMeshAnalyzer
 from .zone_visualizer import ZoneAnalysisVisualizer, PodZoneAnalysisVisualizer
+from .edge_requests_visualizer import EdgeRequestsVisualizer
 
 
 class MetricsVisualizer:
@@ -51,6 +52,7 @@ class MetricsVisualizer:
         self.service_mesh_viz = ServiceMeshAnalyzer(self.data_loader, exclude_zones)
         self.zone_viz = ZoneAnalysisVisualizer(self.data_loader, exclude_zones)
         self.pod_zone_viz = PodZoneAnalysisVisualizer(self.data_loader, exclude_zones)
+        self.edge_requests_viz = EdgeRequestsVisualizer(self.data_loader, exclude_zones)
     
     # Data access properties (for backward compatibility)
     @property
@@ -100,6 +102,10 @@ class MetricsVisualizer:
         self.pod_memory_viz.print_summary()
         self.istio_viz.print_summary()
         
+        # Edge requests summary
+        if self.edge_requests_viz.requests_data is not None:
+            self.edge_requests_viz.print_summary()
+        
         # Data availability
         print(f"\n📈 DATA AVAILABILITY:")
         for metric_type in ['node_cpu', 'node_memory', 'pod_cpu', 'pod_memory', 'istio_latency']:
@@ -108,6 +114,12 @@ class MetricsVisualizer:
                 print(f"   • {metric_type}: ✓ Available ({data_len} records)")
             else:
                 print(f"   • {metric_type}: ✗ Not available")
+        
+        # Edge requests availability
+        if self.edge_requests_viz.requests_data is not None:
+            print(f"   • edge_requests: ✓ Available ({len(self.edge_requests_viz.requests_data)} records)")
+        else:
+            print(f"   • edge_requests: ✗ Not available")
         
         print("\n" + "=" * 60)
     
@@ -154,6 +166,11 @@ class MetricsVisualizer:
         """Create and display advanced service mesh analysis plots."""
         return self.service_mesh_viz.plot_analysis(figsize)
     
+    # Edge requests analysis methods
+    def plot_edge_requests_analysis(self, figsize=(20, 16)):
+        """Create and display edge requests analysis plots."""
+        return self.edge_requests_viz.plot_analysis(figsize)
+    
     # Unified analysis methods
     def plot_all(self, figsize=(16, 12)):
         """Generate and display all available plots."""
@@ -197,6 +214,11 @@ class MetricsVisualizer:
             
             print("\n🔬 Advanced Service Mesh Analysis:")
             self.plot_service_mesh_analysis((20, 16))
+        
+        # Edge requests analysis
+        if self.edge_requests_viz.requests_data is not None:
+            print("\n🚀 Edge Requests Analysis:")
+            self.plot_edge_requests_analysis((20, 16))
     
     def get_data_summary(self):
         """Return a summary of the loaded data as a dictionary."""
@@ -227,6 +249,10 @@ class MetricsVisualizer:
         if (self.data_loader.has_data('pod_cpu') and 
             self.data_loader.has_data('pod_memory')):
             summary['pod_zone_analysis'] = self.pod_zone_viz.get_summary_stats()
+        
+        # Edge requests summary
+        if self.edge_requests_viz.requests_data is not None:
+            summary['edge_requests'] = self.edge_requests_viz.get_summary_stats()
         
         return summary
     
@@ -295,4 +321,8 @@ class MetricsVisualizer:
             'zone_mapping': self.node_ip_to_zone_map,
             'excluded_zones': self.exclude_zones,
             'available_zones': list(set(info['zone'] for info in self.node_ip_to_zone_map.values()))
-        } 
+        }
+    
+    def export_edge_requests_analysis(self, output_dir="edge_requests_analysis"):
+        """Export edge requests analysis to files."""
+        return self.edge_requests_viz.export_analysis(output_dir) 
