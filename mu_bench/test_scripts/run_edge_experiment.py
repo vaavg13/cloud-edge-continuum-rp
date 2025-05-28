@@ -16,15 +16,15 @@ def get_edge_config():
         "base_host": "172.23.0.5",
         "apps": [
             {
-                "name": "iot-sensor-app",  # Different name creates different hash
+                "name": "app-edge",  # Different name creates different hash
                 "port": 31116,
                 "traffic_weight": 1,
                 "wait_time": {"min": 0.3, "max": 1.5}
             },
             {
-                "name": "web-dashboard-app",  # Different name = different behavior
+                "name": "app-edge-2",  # Different name = different behavior
                 "port": 31115,
-                "traffic_weight": 0.6,
+                "traffic_weight": 0.9,
                 "wait_time": {"min": 0.8, "max": 2.5}
             }
         ],
@@ -51,8 +51,8 @@ def main():
     # Note: output_dir will be set by EdgeExperimentManager to be inside the experiment directory
     prometheus_logger = PrometheusExporter(
         prometheus_url="http://localhost:9090",
-        target_namespaces=["app-edge", "app-edge-2", "app-edge-3"],
-        collection_interval_minutes=15,
+        target_namespaces=["app-edge", "app-edge-2"],
+        collection_interval_minutes=5,
         metrics_step="30s",
         output_dir="metrics",  # Will be overridden by EdgeExperimentManager
         verbose=True,
