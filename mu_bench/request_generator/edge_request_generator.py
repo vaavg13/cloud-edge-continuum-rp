@@ -5,6 +5,8 @@ import random
 import requests
 import math
 import csv
+import sys
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -19,6 +21,39 @@ from .edge_calculator import EdgeTrafficCalculator
 from .load_shape import GlobalUserCountShape
 
 
+class CompactFormatter(logging.Formatter):
+    """Ultra-compact formatter with no timestamps or log levels."""
+    
+    def format(self, record):
+        return record.getMessage()
+
+
+class ColoredFormatter(logging.Formatter):
+    """Custom formatter with colors for different log levels."""
+    
+    # ANSI color codes
+    COLORS = {
+        'DEBUG': '\033[36m',    # Cyan
+        'INFO': '\033[32m',     # Green
+        'WARNING': '\033[33m',  # Yellow
+        'ERROR': '\033[31m',    # Red
+        'CRITICAL': '\033[35m', # Magenta
+    }
+    RESET = '\033[0m'
+    
+    def format(self, record):
+        # Add color to the log level
+        if record.levelname in self.COLORS:
+            record.levelname = f"{self.COLORS[record.levelname]}{record.levelname}{self.RESET}"
+        
+        # Use a cleaner format
+        formatter = logging.Formatter(
+            '%(asctime)s %(levelname)s %(message)s',
+            datefmt='%H:%M:%S'
+        )
+        return formatter.format(record)
+
+
 class EdgeRequestGenerator:
     """
     Simplified request generator specifically designed for edge computing scenarios.
@@ -27,13 +62,15 @@ class EdgeRequestGenerator:
     edge site patterns and port-based app differentiation.
     """
     
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: Optional[logging.Logger] = None, quiet_mode: bool = True):
         """
         Initialize the EdgeRequestGenerator.
         
         Args:
             logger: Optional logger instance. If None, creates a default logger.
+            quiet_mode: If True, suppress verbose Locust output
         """
+        self.quiet_mode = quiet_mode
         self.logger = logger or self._setup_default_logger()
         self.edge_calculator = EdgeTrafficCalculator()
         self.environment = None
@@ -47,20 +84,73 @@ class EdgeRequestGenerator:
         self.request_log_writer = None
         self.request_logging_enabled = False
         
-        self.logger.info("EdgeRequestGenerator initialized successfully")
+        # Suppress Locust's verbose logging if in quiet mode
+        if self.quiet_mode:
+            self._setup_quiet_logging()
     
     def _setup_default_logger(self) -> logging.Logger:
-        """Setup a default logger."""
+        """Setup a default logger with compact format."""
         logger = logging.getLogger("EdgeRequestGenerator")
+        
+        # Clear existing handlers to avoid duplicates
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+        
         if not logger.handlers:
             handler = logging.StreamHandler()
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-            )
-            handler.setFormatter(formatter)
+            if self.quiet_mode:
+                handler.setFormatter(CompactFormatter())
+            else:
+                handler.setFormatter(ColoredFormatter())
             logger.addHandler(handler)
             logger.setLevel(logging.INFO)
+            logger.propagate = False  # Prevent propagation to root logger
         return logger
+    
+    def _setup_quiet_logging(self):
+        """Setup quiet logging to suppress Locust's verbose output but keep useful stats."""
+        # Suppress only the most verbose Locust internal loggers
+        # but keep the stats printer which shows the useful table
+        verbose_loggers = [
+            'locust.main',
+            'locust.user',
+            'locust.env'
+        ]
+        
+        # Set these to WARNING to reduce noise but not completely silence
+        moderate_loggers = [
+            'locust.runners'
+        ]
+        
+        for logger_name in verbose_loggers:
+            logging.getLogger(logger_name).setLevel(logging.ERROR)
+            
+        for logger_name in moderate_loggers:
+            logging.getLogger(logger_name).setLevel(logging.WARNING)
+        
+        # Keep locust.stats at INFO level so we see the table
+        # Don't suppress stdout/stderr completely since we want to see the stats table
+        self._original_stdout = sys.stdout
+        self._original_stderr = sys.stderr
+    
+    def _suppress_output(self):
+        """Temporarily suppress stdout/stderr only during environment creation."""
+        if self.quiet_mode:
+            # Only suppress during specific operations, not during stats display
+            self._null_stdout = open(os.devnull, 'w')
+            self._null_stderr = open(os.devnull, 'w')
+            sys.stdout = self._null_stdout
+            sys.stderr = self._null_stderr
+    
+    def _restore_output(self):
+        """Restore stdout/stderr."""
+        if self.quiet_mode and hasattr(self, '_null_stdout'):
+            if hasattr(self._null_stdout, 'close'):
+                self._null_stdout.close()
+            if hasattr(self._null_stderr, 'close'):
+                self._null_stderr.close()
+            sys.stdout = self._original_stdout
+            sys.stderr = self._original_stderr
     
     def _generate_edge_user_classes(self, edge_config: Dict[str, Any]):
         """
@@ -76,7 +166,7 @@ class EdgeRequestGenerator:
         edge_sites = edge_config.get("edge_sites", {})
         
         if not apps or not edge_sites:
-            self.logger.warning("No apps or edge sites defined")
+            self.logger.warning("⚠️ No apps or edge sites defined")
             return
         
         # Create one user class per app (port)
@@ -87,7 +177,7 @@ class EdgeRequestGenerator:
             wait_time_config = app_config.get("wait_time", {"min": 0.5, "max": 2.0})
             
             if not app_port:
-                self.logger.warning(f"Skipping app '{app_name}' - no port specified")
+                self.logger.warning(f"⚠️ Skipping app '{app_name}' - no port specified")
                 continue
             
             # Create dynamic user class for this app
@@ -104,7 +194,6 @@ class EdgeRequestGenerator:
             )
             
             self.user_classes.append(user_class)
-            self.logger.info(f"Generated edge user class: {class_name} for {base_host}:{app_port}")
     
     def _create_edge_user_class(
         self,
@@ -232,31 +321,35 @@ class EdgeRequestGenerator:
         return EdgeUser
     
     def _test_connectivity(self, edge_config: Dict[str, Any]) -> bool:
-        """Test connectivity to all endpoints before starting load test."""
+        """Test connectivity to all edge endpoints."""
         base_host = edge_config.get("base_host", "localhost")
         apps = edge_config.get("apps", [])
         edge_sites = edge_config.get("edge_sites", {})
         
-        self.logger.info("Testing connectivity to edge endpoints...")
+        tested_count = 0
+        failed_endpoints = []
         
-        all_working = True
         for app_config in apps:
             app_port = app_config.get("port")
             if not app_port:
                 continue
                 
             for site_id in edge_sites.keys():
-                url = f"http://{base_host}:{app_port}/s0-{site_id}"
+                endpoint = f"http://{base_host}:{app_port}/s0-{site_id}"
                 try:
-                    response = requests.get(url, timeout=5)
-                    if response.status_code != 200:
-                        self.logger.warning(f"Endpoint {url} returned HTTP {response.status_code}")
-                        all_working = False
-                except Exception as e:
-                    self.logger.error(f"Failed to connect to {url}: {e}")
-                    all_working = False
+                    response = requests.get(endpoint, timeout=5)
+                    if response.status_code not in [200, 404]:  # 404 is OK for non-existent endpoints
+                        failed_endpoints.append(f"{endpoint} (HTTP {response.status_code})")
+                    tested_count += 1
+                except requests.exceptions.RequestException as e:
+                    failed_endpoints.append(f"{endpoint} ({str(e)})")
+                    tested_count += 1
         
-        return all_working
+        if failed_endpoints:
+            self.logger.error(f"❌ Failed endpoints: {', '.join(failed_endpoints)}")
+            return False
+        
+        return True
 
     def run_edge_experiment(
         self,
@@ -286,27 +379,26 @@ class EdgeRequestGenerator:
             True if experiment completed successfully
         """
         try:
-            # Setup logging
-            setup_logging(log_level.upper(), None)
-            
-            # Setup request logging if enabled
-            if enable_request_logging:
-                if not request_log_file:
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    request_log_file = f"edge_requests_{timestamp}.csv"
-                self.enable_request_logging(request_log_file)
+            # Setup Locust logging (but we'll suppress most of it)
+            if self.quiet_mode:
+                setup_logging("WARNING", None)  # Only show warnings/errors from Locust
+            else:
+                setup_logging(log_level.upper(), None)
             
             # Test connectivity first
             if not self._test_connectivity(edge_config):
-                self.logger.error("❌ Some endpoints are not reachable. Check your edge infrastructure.")
                 return False
             
             # Generate user classes
             self._generate_edge_user_classes(edge_config)
             
             if not self.user_classes:
-                self.logger.error("No user classes generated from edge config")
+                self.logger.error("❌ No user classes generated")
                 return False
+            
+            # Setup request logging if enabled
+            if enable_request_logging and request_log_file:
+                self.enable_request_logging(request_log_file)
             
             # Configure load shape
             time_scale_factor = simulated_period_seconds / run_duration_seconds
@@ -316,51 +408,43 @@ class EdgeRequestGenerator:
                 time_scale_factor=time_scale_factor
             )
             
-            # Create environment
-            shape_instance = GlobalUserCountShape()
-            self.environment = Environment(
-                user_classes=self.user_classes,
-                shape_class=shape_instance  # Pass the instance, not the class
-            )
+            # Create Locust environment
+            self._suppress_output()  # Suppress during environment creation
+            try:
+                # Create shape instance
+                shape_instance = GlobalUserCountShape()
+                
+                self.environment = Environment(
+                    user_classes=self.user_classes,
+                    shape_class=shape_instance
+                )
+                
+                # Set generator reference for request logging
+                self.environment.generator_instance = self
+                
+                # Initialize shared simulated time
+                self.environment.shared_simulated_time = GlobalUserCountShape.current_simulated_time_seconds
+                
+                # Create runner
+                self.runner = self.environment.create_local_runner()
+            finally:
+                self._restore_output()
             
-            # Set generator reference for request logging
-            self.environment.generator_instance = self
-            
-            # Initialize shared simulated time - fix the 'bool' object is not callable error
-            self.environment.shared_simulated_time = GlobalUserCountShape.current_simulated_time_seconds
-            
-            self.runner = self.environment.create_local_runner()
-            
-            # Start experiment
-            self.logger.info("🚀 Starting edge computing experiment...")
-            self.logger.info(f"📊 Config: {len(edge_config.get('apps', []))} apps, {len(edge_config.get('edge_sites', {}))} edge sites")
-            self.logger.info(f"⚙️  Parameters: max_users={max_users}, spawn_rate={spawn_rate}, duration={run_duration_seconds}s")
-            
-            if self.request_logging_enabled:
-                self.logger.info(f"📝 Request logging enabled: {self.request_log_file}")
-            
-            # Start stats printer
-            self.stats_printer_greenlet = gevent.spawn(stats_printer(self.environment.stats))
-            
-            # Start load test
+            # Start the test
             self.runner.start_shape()
             
-            # Setup auto-stop
+            # Start stats printer
+            gevent.spawn(stats_printer(self.environment.stats))
+            
+            # Setup stopper
             def stopper():
-                time.sleep(run_duration_seconds)
-                self.logger.info(f"⏰ Duration ({run_duration_seconds}s) reached. Stopping experiment.")
-                if self.runner:
-                    self.runner.quit()
+                gevent.sleep(run_duration_seconds)
+                self.runner.stop()
             
             self.stop_greenlet = gevent.spawn(stopper)
             
             # Wait for completion
             self.runner.greenlet.join()
-            
-            self.logger.info("✅ Edge computing experiment completed successfully!")
-            
-            if self.request_logging_enabled:
-                self.logger.info(f"📊 Request log saved to: {self.request_log_file}")
             
             return True
             
@@ -376,6 +460,16 @@ class EdgeRequestGenerator:
             self.stop_greenlet.kill(block=False)
         if self.stats_printer_greenlet and not self.stats_printer_greenlet.dead:
             self.stats_printer_greenlet.kill(block=False)
+        
+        # Close CSV file if open
+        if hasattr(self, 'request_log_file_handle') and self.request_log_file_handle:
+            try:
+                self.request_log_file_handle.close()
+            except:
+                pass
+        
+        # Restore output if it was suppressed
+        self._restore_output()
     
     def get_stats(self) -> Optional[Dict[str, Any]]:
         """
@@ -399,61 +493,42 @@ class EdgeRequestGenerator:
         }
     
     def enable_request_logging(self, output_file: str):
-        """
-        Enable request logging to CSV file for later visualization.
+        """Enable logging of individual requests to CSV file."""
+        self.request_log_file = Path(output_file)
+        self.request_log_file.parent.mkdir(parents=True, exist_ok=True)
         
-        Args:
-            output_file: Path to CSV file where requests will be logged
-        """
-        try:
-            self.request_log_file = Path(output_file)
-            self.request_log_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Create CSV file with headers
-            with open(self.request_log_file, 'w', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    'timestamp',
-                    'simulated_time_seconds', 
-                    'app_name',
-                    'app_port',
-                    'edge_site',
-                    'endpoint',
-                    'request_type',  # 'normal' or 'burst'
-                    'response_time_ms',
-                    'status_code',
-                    'success'
-                ])
-            
-            self.request_logging_enabled = True
-            self.logger.info(f"✅ Request logging enabled: {self.request_log_file}")
-            
-        except Exception as e:
-            self.logger.error(f"❌ Failed to enable request logging: {e}")
-            self.request_logging_enabled = False
+        # Open CSV file for writing
+        self.request_log_file_handle = open(self.request_log_file, 'w', newline='')
+        self.request_log_writer = csv.writer(self.request_log_file_handle)
+        
+        # Write header
+        self.request_log_writer.writerow([
+            'timestamp', 'app_name', 'app_port', 'edge_site', 'endpoint', 
+            'request_type', 'response_time_ms', 'status_code', 'success', 'simulated_time'
+        ])
+        
+        self.request_logging_enabled = True
     
     def _log_request(self, app_name: str, app_port: int, edge_site: str, endpoint: str, 
                     request_type: str, response_time_ms: float, status_code: int, 
                     success: bool, simulated_time: float):
         """Log a request to the CSV file."""
-        if not self.request_logging_enabled or not self.request_log_file:
+        if not self.request_logging_enabled or not self.request_log_writer:
             return
             
         try:
-            with open(self.request_log_file, 'a', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    datetime.now().isoformat(),
-                    round(simulated_time, 2),
-                    app_name,
-                    app_port,
-                    edge_site,
-                    endpoint,
-                    request_type,
-                    round(response_time_ms, 2),
-                    status_code,
-                    success
-                ])
+            self.request_log_writer.writerow([
+                datetime.now().isoformat(),
+                app_name,
+                app_port,
+                edge_site,
+                endpoint,
+                request_type,
+                round(response_time_ms, 2),
+                status_code,
+                success,
+                round(simulated_time, 2)
+            ])
         except Exception as e:
             self.logger.warning(f"Failed to log request: {e}")
 

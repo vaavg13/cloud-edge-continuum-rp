@@ -11,9 +11,42 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+class CompactFormatter(logging.Formatter):
+    """Ultra-compact formatter with no timestamps or log levels."""
+    
+    def format(self, record):
+        return record.getMessage()
+
+
+class ColoredFormatter(logging.Formatter):
+    """Custom formatter with colors for different log levels."""
+    
+    # ANSI color codes
+    COLORS = {
+        'DEBUG': '\033[36m',    # Cyan
+        'INFO': '\033[32m',     # Green
+        'WARNING': '\033[33m',  # Yellow
+        'ERROR': '\033[31m',    # Red
+        'CRITICAL': '\033[35m', # Magenta
+    }
+    RESET = '\033[0m'
+    
+    def format(self, record):
+        # Add color to the log level
+        if record.levelname in self.COLORS:
+            record.levelname = f"{self.COLORS[record.levelname]}{record.levelname}{self.RESET}"
+        
+        # Use a cleaner format
+        formatter = logging.Formatter(
+            '%(asctime)s %(levelname)s %(message)s',
+            datefmt='%H:%M:%S'
+        )
+        return formatter.format(record)
+
+
 class EdgeExperimentManager:
     def __init__(self, prometheus_exporter, traffic_generator, 
-                 experiment_name=None, output_base_dir="DATA"):
+                 experiment_name=None, output_base_dir="DATA", quiet_mode=True):
         """
         Initialize the experiment manager.
         
@@ -22,6 +55,7 @@ class EdgeExperimentManager:
             traffic_generator: EdgeRequestGenerator instance for load generation
             experiment_name (str): Name for this experiment (auto-generated if None)
             output_base_dir (str): Base directory for output files
+            quiet_mode (bool): If True, use cleaner, less verbose logging
         """
         # Generate experiment name if not provided
         if experiment_name is None:
@@ -31,6 +65,7 @@ class EdgeExperimentManager:
         self.experiment_name = experiment_name
         self.output_dir = Path(output_base_dir) / experiment_name
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.quiet_mode = quiet_mode
         
         # Store components
         self.prometheus_exporter = prometheus_exporter
@@ -65,15 +100,37 @@ class EdgeExperimentManager:
         """Setup logging to both file and console."""
         log_file = self.output_dir / f"{self.experiment_name}.log"
         
-        # Configure logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler(sys.stdout)
-            ]
-        )
+        # Clear any existing handlers to avoid duplicates
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+        
+        # Configure logging with ultra-compact format
+        if self.quiet_mode:
+            # Use compact formatter for console (no timestamps, no log levels)
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(CompactFormatter())
+            
+            # Use standard formatter for file
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setFormatter(logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            ))
+            
+            # Configure root logger
+            root_logger.setLevel(logging.INFO)
+            root_logger.addHandler(file_handler)
+            root_logger.addHandler(console_handler)
+        else:
+            # Original verbose logging
+            logging.basicConfig(
+                level=logging.INFO,
+                format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                handlers=[
+                    logging.FileHandler(log_file),
+                    logging.StreamHandler(sys.stdout)
+                ]
+            )
         
     def setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown."""
@@ -109,20 +166,11 @@ class EdgeExperimentManager:
             # Show overview
             self._show_experiment_overview(edge_config, duration_hours, simulated_hours)
             
-            self.logger.info("\n" + "=" * 50)
-            self.logger.info("🎯 STARTING EXPERIMENT")
-            self.logger.info("=" * 50)
-            
             # Start metrics collection
-            self.logger.info("📊 Starting Prometheus metrics collection...")
-            self.logger.info(f"📁 Metrics will be saved to: {self.output_dir / 'metrics'}")
             self.prometheus_exporter.start_collection()
             
             # Wait a moment for metrics collection to stabilize
             time.sleep(5)
-            
-            # Start the edge load test
-            self.logger.info("🚀 Starting edge load test...")
             
             # Setup request logging file path
             request_log_file = None
@@ -145,7 +193,6 @@ class EdgeExperimentManager:
             self.is_running = False
             
             if success:
-                self.logger.info("✅ Edge load test completed successfully!")
                 self._show_final_results()
                 return True
             else:
@@ -168,75 +215,56 @@ class EdgeExperimentManager:
     
     def _stop_metrics_collection(self):
         """Stop metrics collection."""
-        self.logger.info("📊 Stopping metrics collection...")
         self.prometheus_exporter.stop_collection()
+        print("📊 Metrics collection completed")
         
-        # Show metrics file locations
-        csv_files = self.prometheus_exporter.get_csv_files()
-        self.logger.info("\n📁 Metrics files saved to:")
-        for metric_type, filepath in csv_files.items():
-            if filepath.exists():
-                file_size = filepath.stat().st_size / 1024  # Size in KB
-                self.logger.info(f"   • {metric_type}: {filepath} ({file_size:.1f} KB)")
-    
     def _show_experiment_overview(self, edge_config, duration_hours, simulated_hours):
-        """Display experiment configuration and overview."""
-        self.logger.info("=" * 70)
-        self.logger.info(f"🚀 EDGE COMPUTING EXPERIMENT: {self.experiment_name}")
-        self.logger.info("=" * 70)
-        self.logger.info(f"📁 Output Directory: {self.output_dir}")
-        self.logger.info(f"🕐 Duration: {duration_hours} hours (simulating {simulated_hours} hours)")
-        self.logger.info(f"📊 Metrics Collection: Every {self.prometheus_exporter.collection_interval_minutes} minutes")
-        self.logger.info(f"🌐 Target Host: {edge_config['base_host']}")
+        """Display experiment configuration in a compact table format."""
         
-        self.logger.info("\n🔌 Edge Applications:")
+        # Experiment header
+        print(f"\n🚀 EXPERIMENT: {self.experiment_name}")
+        print("=" * 60)
+        
+        # Configuration table
+        print("📋 CONFIGURATION")
+        print(f"{'Duration:':<15} {duration_hours}h real → {simulated_hours}h simulated")
+        print(f"{'Host:':<15} {edge_config['base_host']}")
+        print(f"{'Output:':<15} {self.output_dir.name}")
+        print(f"{'Metrics:':<15} Every {self.prometheus_exporter.collection_interval_minutes}min")
+        
+        # Apps table
+        print(f"\n🔌 APPLICATIONS ({len(edge_config['apps'])})")
         for app in edge_config['apps']:
-            self.logger.info(f"   • {app['name']} (Port {app['port']}) - Weight: {app['traffic_weight']}")
+            print(f"  {app['name']:<12} Port {app['port']:<6} Weight {app['traffic_weight']}")
         
-        self.logger.info("\n🌍 Edge Sites:")
+        # Sites table  
+        print(f"\n🌍 EDGE SITES ({len(edge_config['edge_sites'])})")
         for site_id, site_config in edge_config['edge_sites'].items():
-            self.logger.info(f"   • {site_id}: {site_config['description']}")
-            self.logger.info(f"     Pattern: {site_config['pattern']}, Weight: {site_config['traffic_weight']}")
+            print(f"  {site_id:<15} {site_config['pattern']:<15} Weight {site_config['traffic_weight']}")
         
-        self.logger.info("\n📈 Generated Endpoints:")
-        for app in edge_config['apps']:
-            for site_id in edge_config['edge_sites'].keys():
-                url = f"http://{edge_config['base_host']}:{app['port']}/s0-{site_id}"
-                self.logger.info(f"   • {url}")
+        # Endpoints count
+        endpoint_count = len(edge_config['apps']) * len(edge_config['edge_sites'])
+        print(f"\n📈 ENDPOINTS: {endpoint_count} total")
         
-        self.logger.info("\n📊 Metrics to be collected:")
-        self.logger.info("   • Node CPU usage")
-        self.logger.info("   • Node memory usage") 
-        self.logger.info("   • Pod CPU usage")
-        self.logger.info("   • Pod memory usage")
-        self.logger.info("   • Istio service latency (P95)")
+        print("=" * 60)
     
     def _show_final_results(self):
-        """Show final experiment results."""
-        self.logger.info("\n" + "=" * 50)
-        self.logger.info("📊 EXPERIMENT RESULTS")
-        self.logger.info("=" * 50)
+        """Show final experiment results in compact format."""
+        print("\n" + "=" * 60)
+        print("✅ EXPERIMENT COMPLETED")
+        print("=" * 60)
         
         # Get load test stats
         stats = self.traffic_generator.get_stats()
         if stats:
-            self.logger.info("🎯 Load Test Results:")
-            self.logger.info(f"   Total Requests: {stats['total_requests']:,}")
-            self.logger.info(f"   Requests/Second: {stats['requests_per_second']:.2f}")
-            self.logger.info(f"   Average Response Time: {stats['average_response_time']:.2f} ms")
-            self.logger.info(f"   Failure Rate: {stats['failure_rate']:.2%}")
+            print("📊 RESULTS")
+            print(f"{'Requests:':<15} {stats['total_requests']:,}")
+            print(f"{'Rate:':<15} {stats['requests_per_second']:.1f} req/s")
+            print(f"{'Avg Response:':<15} {stats['average_response_time']:.0f} ms")
+            print(f"{'Failures:':<15} {stats['failure_rate']:.1%}")
         
-        # Show output directory
-        self.logger.info(f"\n📁 All experiment data saved to: {self.output_dir}")
-        self.logger.info(f"📝 Experiment log: {self.output_dir / f'{self.experiment_name}.log'}")
-        self.logger.info(f"📊 Metrics data: {self.output_dir / 'metrics'}")
-        
-        # Show request log file if available
-        request_log_file = self.traffic_generator.get_request_log_file()
-        if request_log_file and request_log_file.exists():
-            file_size = request_log_file.stat().st_size / 1024  # Size in KB
-            self.logger.info(f"📈 Request log: {request_log_file} ({file_size:.1f} KB)")
-            self.logger.info("   Use this file for traffic pattern visualization and analysis")
+        print(f"\n📁 OUTPUT: {self.output_dir}")
+        print("=" * 60)
 
     @property
     def output_directory(self):

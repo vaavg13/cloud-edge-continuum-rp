@@ -1,3 +1,9 @@
+"""
+Request Generator Module
+
+This module provides request generation capabilities for edge computing experiments.
+"""
+
 from .edge_request_generator import EdgeRequestGenerator
 from .edge_calculator import EdgeTrafficCalculator
 from .load_shape import GlobalUserCountShape
