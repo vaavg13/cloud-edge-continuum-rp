@@ -32,7 +32,6 @@ class K8sDeploymentManager:
         nginx_gw: bool = True,
         nginx_svc_type: str = "NodePort",
         no_apply: bool = False,
-        internal_service_functions_path: str = "./mu_bench/custom_functions",
         output_dir: str = "SimulationWorkspace",
         nginx_node_port: int = 31114,
         istio_injection: bool = False
@@ -49,7 +48,6 @@ class K8sDeploymentManager:
         self.nginx_gw = nginx_gw
         self.nginx_svc_type = nginx_svc_type
         self.no_apply = no_apply
-        self.internal_service_functions_path = internal_service_functions_path
         self.output_dir = output_dir
         self.nginx_node_port = nginx_node_port
         self.istio_injection = istio_injection
@@ -88,7 +86,6 @@ class K8sDeploymentManager:
             "nginx_gw": self.nginx_gw,
             "nginx_svc_type": self.nginx_svc_type,
             "no_apply": self.no_apply,
-            "internal_service_functions_path": self.internal_service_functions_path,
             "output_dir": self.output_dir,
             "nginx_node_port": self.nginx_node_port,
             "istio_injection": self.istio_injection
@@ -114,6 +111,8 @@ class K8sDeploymentManager:
             workmodel = json.load(f)
         # Remove deployment_dir from params to avoid passing it twice
         params.pop("deployment_dir", None)
+        # Remove internal_service_functions_path if it exists (legacy parameter)
+        params.pop("internal_service_functions_path", None)
         instance = cls(workmodel=workmodel, **params)
         instance.deployment_dir = deployment_dir
         return instance
@@ -134,8 +133,7 @@ class K8sDeploymentManager:
         builder.customize_and_generate_yamls(
             workmodel=self.workmodel,
             nfs_conf=self.nfs_conf,
-            output_path=self.deployment_dir,
-            internal_service_functions_path=self.internal_service_functions_path
+            output_path=self.deployment_dir
         )
         return os.listdir(os.path.join(self.deployment_dir, "yamls"))
 

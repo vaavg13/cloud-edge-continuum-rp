@@ -444,8 +444,7 @@ class K8sApiBuilder:
     def generate_all_resources(
         self, 
         workmodel: Dict[str, Any], 
-        nfs_conf: Dict[str, Any], 
-        internal_service_functions_path: Optional[str] = None
+        nfs_conf: Dict[str, Any]
     ) -> Dict[str, List]:
         """
         Generate all Kubernetes resources.
@@ -457,9 +456,10 @@ class K8sApiBuilder:
         # Create deployment and service resources
         self.create_deployment_service_resources(expanded_workmodel)
         
-        # Create ConfigMaps using the handler
+        # Create ConfigMaps using the handler - use absolute path
+        custom_functions_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "custom_functions")
         self.configmap_handler.create_workmodel_configmap(expanded_workmodel)
-        self.configmap_handler.create_internal_services_configmap(internal_service_functions_path)
+        self.configmap_handler.create_internal_services_configmap(custom_functions_path)
         
         # Update our tracking with ConfigMap results
         self.created_resources['configmaps'].extend(self.configmap_handler.get_created_resources())
@@ -489,8 +489,7 @@ class K8sApiBuilder:
     def customize_and_generate_resources(
         self, 
         workmodel: Dict[str, Any], 
-        nfs_conf: Dict[str, Any], 
-        internal_service_functions_path: Optional[str] = None
+        nfs_conf: Dict[str, Any]
     ) -> Dict[str, List]:
         """
         Main entry point that mirrors the YAML builder's customize_and_generate_yamls method
@@ -498,8 +497,7 @@ class K8sApiBuilder:
         self.customize_workmodel(workmodel)
         return self.generate_all_resources(
             workmodel=workmodel,
-            nfs_conf=nfs_conf,
-            internal_service_functions_path=internal_service_functions_path
+            nfs_conf=nfs_conf
         )
 
     def cleanup_resources(self):

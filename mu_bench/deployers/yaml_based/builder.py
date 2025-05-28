@@ -118,7 +118,7 @@ class K8sYamlBuilder:
                 "namespace": self.namespace
             })
 
-    def generate_all_yamls(self, workmodel, nfs_conf, output_path, internal_service_functions_path):
+    def generate_all_yamls(self, workmodel, nfs_conf, output_path):
         # Expand workmodel expands individual deployments into separate services
         # For example, if the workmodel has a service "s0" with deployments
         # "s0-edge-site-1" and "s0-edge-site-2", the expanded workmodel will have
@@ -143,13 +143,14 @@ class K8sYamlBuilder:
             output_suffix="ConfigMapWorkmodel.yaml"
         )
 
-        # Create internal services configmap
+        # Create internal services configmap - use absolute path
+        custom_functions_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "custom_functions")
         self.create_configmap_yaml_file(
             workmodel=None,
             output_path=output_path,
             template_name="ConfigMapInternalServicesTemplate.yaml",
             context={
-                "data": self._get_internal_service_data(internal_service_functions_path),
+                "data": self._get_internal_service_data(custom_functions_path),
                 "namespace": self.namespace
             },
             output_suffix="ConfigMapInternalServices.yaml"
@@ -282,11 +283,10 @@ class K8sYamlBuilder:
         )
         self._write_yaml(deployment_output, deploy_content)
 
-    def customize_and_generate_yamls(self, workmodel, nfs_conf, output_path, internal_service_functions_path):
+    def customize_and_generate_yamls(self, workmodel, nfs_conf, output_path):
         self.customize_workmodel(workmodel)
         self.generate_all_yamls(
             workmodel=workmodel,
             nfs_conf=nfs_conf,
-            output_path=output_path,
-            internal_service_functions_path=internal_service_functions_path
+            output_path=output_path
         ) 
