@@ -14,6 +14,9 @@ import subprocess
 import json
 import warnings
 from abc import ABC, abstractmethod
+import pytz
+from datetime import datetime
+from dateutil.tz import tzlocal
 
 warnings.filterwarnings('ignore')
 
@@ -125,11 +128,12 @@ class BaseVisualizer(ABC):
 class DataLoader:
     """Handles loading and managing metrics data from CSV files."""
     
-    def __init__(self, metrics_dir):
+    def __init__(self, metrics_dir, experiment_start_time=None):
         """Initialize the data loader with the metrics directory path.
         
         Args:
             metrics_dir (str): Path to the metrics directory
+            experiment_start_time (pd.Timestamp, optional): Experiment start time for filtering
         """
         self.metrics_dir = Path(metrics_dir)
         if not self.metrics_dir.exists():
@@ -137,6 +141,7 @@ class DataLoader:
         
         self.data = {}
         self.node_ip_to_zone_map = {}
+        self.experiment_start_time = experiment_start_time
         self.load_data()
         self.load_node_zone_mapping()
     
@@ -150,20 +155,49 @@ class DataLoader:
             'istio_latency': 'istio_latency.csv'
         }
         
+        # Get local timezone
+        local_tz_obj = tzlocal()
+        try:
+            local_tz_display_name = local_tz_obj.tzname(datetime.now(local_tz_obj))
+            if not local_tz_display_name:
+                local_tz_display_name = str(local_tz_obj)
+        except:
+            local_tz_display_name = str(local_tz_obj)
+
+        print(f"🕒 Plotting timestamps will be converted to local timezone: {local_tz_display_name}")
+
         for metric_type, filename in csv_files.items():
             file_path = self.metrics_dir / filename
             if file_path.exists():
                 try:
                     df = pd.read_csv(file_path)
                     if len(df) > 1:  # Check if file has data beyond header
-                        # Convert timestamps to datetime
+                        # Convert timestamps to datetime (UTC)
                         if 'timestamp' in df.columns:
-                            df['datetime'] = pd.to_datetime(df['timestamp'], unit='s')
+                            df['datetime'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
                         if 'collection_time' in df.columns:
-                            df['collection_datetime'] = pd.to_datetime(df['collection_time'], unit='s')
+                            df['collection_datetime'] = pd.to_datetime(df['collection_time'], unit='s', utc=True)
+                        
+                        # Filter by experiment_start_time (timestamps are UTC at this point)
+                        if self.experiment_start_time:
+                            datetime_col_to_filter = None
+                            if 'datetime' in df.columns and not df.empty:
+                                datetime_col_to_filter = 'datetime'
+                            elif 'collection_datetime' in df.columns and not df.empty:
+                                datetime_col_to_filter = 'collection_datetime'
+                            
+                            if datetime_col_to_filter:
+                                records_before_filter = len(df)
+                                df = df[df[datetime_col_to_filter] >= self.experiment_start_time].copy()
+                        
+                        # Convert to local timezone for plotting
+                        if 'datetime' in df.columns and not df.empty:
+                            df['datetime'] = df['datetime'].dt.tz_convert(local_tz_obj)
+                        if 'collection_datetime' in df.columns and not df.empty:
+                            df['collection_datetime'] = df['collection_datetime'].dt.tz_convert(local_tz_obj)
                         
                         self.data[metric_type] = df
-                        print(f"✓ Loaded {metric_type}: {len(df)} records")
+                        print(f"✓ Loaded {metric_type}: {len(df)} records (filtered by start time if applicable, converted to {local_tz_display_name})")
                     else:
                         print(f"⚠ {metric_type}: File exists but contains no data")
                 except Exception as e:

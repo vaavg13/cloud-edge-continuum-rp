@@ -341,18 +341,20 @@ class ResourceOverviewVisualizer(BaseVisualizer):
         
         # Create subplots
         fig, axes = plt.subplots(2, 2, figsize=figsize)
-        fig.suptitle('Resource Utilization Overview', fontsize=16, fontweight='bold')
+        fig.suptitle('Node Resource Utilization Overview', fontsize=16, fontweight='bold')
         
-        # 1. CPU vs Memory scatter plot
+        # 1. CPU vs Memory Scatter Plot
         self._plot_cpu_memory_scatter(axes[0, 0], merged_df)
-        
-        # 2. Resource utilization over time (normalized)
-        self._plot_normalized_utilization(axes[0, 1], merged_df)
-        
-        # 3. Resource efficiency (CPU/Memory ratio)
-        self._plot_resource_efficiency(axes[1, 0], merged_df)
-        
-        # 4. Total resource consumption over time
+
+        # 2. Resource Efficiency (Work Done / Resource Used) - Placeholder for now
+        self._plot_resource_efficiency(axes[0, 1], merged_df)
+
+        # 3. Normalized Resource Utilization Over Time - Commenting this out
+        # self._plot_normalized_utilization(axes[1, 0], merged_df) 
+        axes[1, 0].text(0.5, 0.5, 'Normalized Utilization Plot Removed', ha='center', va='center', fontsize=12, color='grey')
+        axes[1, 0].set_title('Normalized Resource Utilization Over Time') # Keep title for layout
+
+        # 4. Total Resource Consumption (CPU + Memory)
         self._plot_total_consumption(axes[1, 1], merged_df)
         
         plt.tight_layout()
@@ -374,41 +376,6 @@ class ResourceOverviewVisualizer(BaseVisualizer):
         ax.set_ylabel('Memory Usage (GB)')
         ax.legend()
         ax.grid(True, alpha=0.3)
-    
-    def _plot_normalized_utilization(self, ax, merged_df):
-        """Plot normalized resource utilization over time."""
-        for node in merged_df['node'].unique():
-            node_data = merged_df[merged_df['node'] == node]
-            if len(node_data) > 1:  # Ensure we have enough data for normalization
-                # Generate short label for legend (just node name or zone)
-                if node in self.node_ip_to_zone_map:
-                    short_label = self.node_ip_to_zone_map[node]['name']
-                else:
-                    short_label = node
-                
-                # Normalize to 0-1 scale for comparison
-                cpu_range = node_data['cpu_cores_used'].max() - node_data['cpu_cores_used'].min()
-                mem_range = node_data['memory_gb'].max() - node_data['memory_gb'].min()
-                
-                if cpu_range > 0:
-                    cpu_norm = (node_data['cpu_cores_used'] - node_data['cpu_cores_used'].min()) / cpu_range
-                else:
-                    cpu_norm = node_data['cpu_cores_used'] * 0  # All zeros if no variation
-                
-                if mem_range > 0:
-                    mem_norm = (node_data['memory_gb'] - node_data['memory_gb'].min()) / mem_range
-                else:
-                    mem_norm = node_data['memory_gb'] * 0  # All zeros if no variation
-                
-                ax.plot(node_data['datetime'], cpu_norm, label=f'{short_label} CPU', linestyle='-', alpha=0.7)
-                ax.plot(node_data['datetime'], mem_norm, label=f'{short_label} Mem', linestyle='--', alpha=0.7)
-        
-        ax.set_title('Normalized Resource Utilization Over Time')
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Normalized Usage (0-1)')
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        ax.grid(True, alpha=0.3)
-        ax.tick_params(axis='x', rotation=45)
     
     def _plot_resource_efficiency(self, ax, merged_df):
         """Plot resource efficiency (CPU/Memory ratio)."""

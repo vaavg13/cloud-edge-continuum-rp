@@ -145,31 +145,66 @@ class CPUVisualizer(BaseVisualizer):
             node_data = df[df['node'] == node].sort_values('datetime')
             if len(node_data) > 1:
                 # Calculate rate of change (derivative)
-                time_diff = (node_data['datetime'].diff().dt.total_seconds() / 60).fillna(1)  # minutes
-                cpu_diff = node_data['cpu_cores_used'].diff().fillna(0)
-                rate = (cpu_diff / time_diff).abs()  # absolute rate of change per minute
+                time_diff_seconds = node_data['datetime'].diff().dt.total_seconds()
+                # Replace 0s in time_diff_seconds with a very small number to avoid division by zero, or handle as NaN later
+                # A more robust way is to set rate to NaN where time_diff is zero.
+                time_diff_minutes = time_diff_seconds / 60
                 
-                utilization_rates.extend(rate.values)
-                node_names.extend([self._generate_node_label(node).split(' (')[0]] * len(rate))
+                cpu_diff = node_data['cpu_cores_used'].diff().fillna(0)
+                
+                # Calculate rate, handle potential division by zero by checking time_diff_minutes
+                rate = np.where(time_diff_minutes == 0, np.nan, (cpu_diff / time_diff_minutes).abs())
+                rate_series = pd.Series(rate, index=node_data.index).fillna(0) # fillna(0) for the first element from diff()
+                                
+                utilization_rates.extend(rate_series.values)
+                node_names.extend([self._generate_node_label(node).split(' (')[0]] * len(rate_series))
         
         if utilization_rates:
-            # Create DataFrame for easier plotting
             rate_df = pd.DataFrame({
                 'node': node_names,
                 'utilization_rate': utilization_rates
             })
+
+            # Replace any inf values that might have slipped through (e.g. from cpu_diff / very_small_number if not handled above)
+            rate_df.replace([np.inf, -np.inf], np.nan, inplace=True)
+            # Drop rows where utilization_rate is NaN (e.g. from division by zero or first element)
+            rate_df.dropna(subset=['utilization_rate'], inplace=True)
+
+            if rate_df.empty:
+                ax.text(0.5, 0.5, 'Insufficient data after cleaning\nfor rate analysis', 
+                    ha='center', va='center', transform=ax.transAxes, fontsize=10)
+                ax.set_title('CPU Utilization Rate Analysis')
+                return
             
             # Remove extreme outliers for better visualization
             q95 = rate_df['utilization_rate'].quantile(0.95)
-            rate_df_filtered = rate_df[rate_df['utilization_rate'] <= q95]
+
+            if pd.isna(q95):
+                rate_df_filtered = rate_df.copy() # Use all data if q95 is NaN
+            else:
+                rate_df_filtered = rate_df[rate_df['utilization_rate'] <= q95]
             
             # Box plot of utilization rates
-            unique_nodes = rate_df_filtered['node'].unique()
-            rate_data = [rate_df_filtered[rate_df_filtered['node'] == node]['utilization_rate'].values 
-                        for node in unique_nodes]
+            temp_unique_nodes = rate_df_filtered['node'].unique()
+            temp_rate_data = [rate_df_filtered[rate_df_filtered['node'] == node]['utilization_rate'].values 
+                              for node in temp_unique_nodes]
             
-            bp = ax.boxplot(rate_data, labels=unique_nodes, patch_artist=True)
-            colors = plt.cm.Set3(np.linspace(0, 1, len(unique_nodes)))
+            # Filter out nodes with no data after quantile filtering for boxplot
+            final_rate_data = []
+            final_unique_nodes = []
+            for node_label, data_array in zip(temp_unique_nodes, temp_rate_data):
+                if data_array.size > 0:
+                    final_rate_data.append(data_array)
+                    final_unique_nodes.append(node_label)
+
+            if not final_rate_data: # Check if all data was filtered out
+                ax.text(0.5, 0.5, 'Data too sparse\nfor rate boxplot after filtering', 
+                       ha='center', va='center', transform=ax.transAxes, fontsize=10)
+                ax.set_title('CPU Utilization Rate Analysis')
+                return
+            
+            bp = ax.boxplot(final_rate_data, labels=final_unique_nodes, patch_artist=True)
+            colors = plt.cm.Set3(np.linspace(0, 1, len(final_unique_nodes)))
             for patch, color in zip(bp['boxes'], colors):
                 patch.set_facecolor(color)
             

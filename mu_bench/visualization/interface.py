@@ -7,6 +7,11 @@ modular architecture underneath.
 """
 
 from pathlib import Path
+import pandas as pd
+import re
+from datetime import datetime
+import pytz
+from dateutil.tz import tzlocal
 from .base import DataLoader
 from .cpu_visualizer import CPUVisualizer, PodCPUVisualizer
 from .memory_visualizer import MemoryVisualizer, PodMemoryVisualizer, ResourceOverviewVisualizer
@@ -24,22 +29,47 @@ class MetricsVisualizer:
     and extensibility.
     """
     
-    def __init__(self, metrics_dir, exclude_zones=None):
-        """Initialize the metrics visualizer with the metrics directory path.
+    def __init__(self, experiment_dir, exclude_zones=None):
+        """Initialize the metrics visualizer with the main experiment directory path.
         
         Args:
-            metrics_dir (str): Path to the metrics directory
+            experiment_dir (str): Path to the main experiment directory 
+                                  (e.g., '../DATA/edge_experiment_YYYY_MM_DD_HH_MM/')
             exclude_zones (list, optional): List of zone names to exclude from analysis
                                           (e.g., ['Unknown', 'edge-site-2'])
         """
-        self.metrics_dir = Path(metrics_dir)
+        self.experiment_dir = Path(experiment_dir)
+        self.metrics_dir = self.experiment_dir / 'metrics'
+        
         if not self.metrics_dir.exists():
-            raise FileNotFoundError(f"Metrics directory not found: {metrics_dir}")
+            raise FileNotFoundError(f"Metrics directory not found at: {self.metrics_dir}")
         
         self.exclude_zones = exclude_zones or []
         
-        # Initialize data loader
-        self.data_loader = DataLoader(metrics_dir)
+        # Extract experiment start time from experiment_dir name
+        experiment_start_time = None
+        try:
+            dir_name = self.experiment_dir.name
+            match = re.search(r'(\d{4}_\d{2}_\d{2}_\d{2}_\d{2})', dir_name)
+            if match:
+                time_str = match.group(1)
+                # Parse as naive datetime first
+                dt_obj_naive = datetime.strptime(time_str, '%Y_%m_%d_%H_%M')
+                
+                # Convert to pandas Timestamp, then localize and convert to UTC
+                ts_naive = pd.Timestamp(dt_obj_naive)
+                local_tz_info = tzlocal() # Get local tzinfo object
+                ts_local = ts_naive.tz_localize(local_tz_info) # Localize to system's timezone
+                experiment_start_time = ts_local.tz_convert('UTC') # Convert to UTC
+                
+                print(f"🕒 Parsed time_str '{time_str}' from {dir_name}. Assumed local time: {ts_local}. Converted to UTC for filtering: {experiment_start_time}")
+            else:
+                print(f"⚠️ Could not parse experiment start time from directory name: {dir_name}. Visualizations will not be filtered by start time.")
+        except Exception as e:
+            print(f"⚠️ Error parsing experiment start time from {dir_name}: {e}. Visualizations will not be filtered by start time.")
+
+        # Initialize data loader with the actual metrics directory path
+        self.data_loader = DataLoader(str(self.metrics_dir), experiment_start_time=experiment_start_time)
         
         # Initialize visualization components
         self.cpu_viz = CPUVisualizer(self.data_loader, exclude_zones)
