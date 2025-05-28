@@ -25,4 +25,4 @@ __all__ = [
     'list_available_patterns'
 ]
 
-__version__ = '3.0.0'  # Major version bump for simplified edge-centric approach
+__version__ = '3.1.0'

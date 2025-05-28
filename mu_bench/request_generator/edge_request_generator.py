@@ -123,13 +123,6 @@ class EdgeRequestGenerator:
         logger = self.logger
         captured_wait_time = wait_time  # Capture wait_time for closure
         
-        # Generate app-specific characteristics for more realistic behavior
-        app_hash = hash(app_name)
-        app_time_offset = (app_hash % (6 * 3600))  # 0-6 hour offset per app
-        app_burst_base_prob = 0.008 + (app_hash % 100) / 10000  # 0.008-0.018% (reduced from 0.015-0.035%)
-        app_burst_volume_factor = 0.6 + (app_hash % 1000) / 3333  # 0.6-0.9 (reduced from 0.5-1.0)
-        app_traffic_phase = (app_hash % 100) / 100.0 * 2 * 3.14159  # Phase shift for traffic patterns
-        
         class EdgeUser(HttpUser):
             weight = int(app_weight * 10)  # Scale for Locust weights
             wait_time = captured_wait_time
@@ -143,19 +136,6 @@ class EdgeRequestGenerator:
                 self.edge_sites = edge_sites
                 self.edge_calculator = edge_calculator
                 
-                # App-specific behavioral characteristics
-                self.time_offset = app_time_offset
-                self.burst_probability = app_burst_base_prob
-                self.burst_volume_factor = app_burst_volume_factor
-                self.traffic_phase = app_traffic_phase
-                self.burst_cooldown = 0
-                self.consecutive_requests = 0
-                
-                # Per-instance randomization for even more variation
-                instance_hash = hash(f"{app_name}_{id(self)}")
-                self.instance_time_jitter = (instance_hash % 1800)  # 0-30 min per instance
-                self.instance_burst_modifier = 0.8 + (instance_hash % 400) / 1000  # 0.8-1.2 modifier
-                
                 # Reference to parent generator for logging
                 self.generator = None
                 if hasattr(environment, 'generator_instance'):
@@ -166,87 +146,10 @@ class EdgeRequestGenerator:
                 """Make requests to edge sites based on traffic patterns."""
                 if not hasattr(self.environment, 'shared_simulated_time'):
                     # Fallback to real time if no simulated time
-                    base_time = time.time() % 86400  # Current time in day
+                    current_time = time.time() % 86400  # Current time in day
                 else:
-                    base_time = self.environment.shared_simulated_time
+                    current_time = self.environment.shared_simulated_time
                 
-                # Apply app-specific time offset and instance jitter
-                current_time = (base_time + self.time_offset + self.instance_time_jitter) % 86400
-                
-                # Decrease burst cooldown
-                if self.burst_cooldown > 0:
-                    self.burst_cooldown -= 1
-                
-                # Calculate dynamic burst probability based on app activity
-                self.consecutive_requests += 1
-                activity_multiplier = min(2.0, 1.0 + self.consecutive_requests / 100)
-                
-                # Add temporal variation to burst probability
-                time_factor = 1.0 + 0.2 * math.sin(current_time / 86400 * 2 * 3.14159 + self.traffic_phase)
-                dynamic_burst_prob = self.burst_probability * activity_multiplier * time_factor * self.instance_burst_modifier
-                
-                # Check for independent app burst
-                is_burst = False
-                if self.burst_cooldown == 0 and random.random() < dynamic_burst_prob:
-                    is_burst = True
-                    # Variable burst volume and cooldown (reduced intensity)
-                    burst_intensity = random.uniform(0.2, 0.6) * self.burst_volume_factor
-                    burst_duration = max(1, int(random.uniform(3, 12) * burst_intensity))
-                    self.burst_cooldown = random.randint(60, 180)
-                    self.consecutive_requests = 0
-                    
-                    # For burst requests, select random sites with higher frequency
-                    if random.random() < burst_intensity:
-                        site_ids = list(self.edge_sites.keys())
-                        chosen_site = random.choice(site_ids)
-                        endpoint = f"/s0-{chosen_site}"
-                        request_name = f"{self.app_port}:{endpoint}:BURST"
-                        
-                        start_time = time.time()
-                        try:
-                            with self.client.get(endpoint, name=request_name, catch_response=True) as response:
-                                response_time_ms = (time.time() - start_time) * 1000
-                                success = response.status_code == 200
-                                
-                                if success:
-                                    response.success()
-                                else:
-                                    response.failure(f"HTTP {response.status_code}")
-                                
-                                # Log the request
-                                if self.generator:
-                                    self.generator._log_request(
-                                        app_name=self.app_name,
-                                        app_port=self.app_port,
-                                        edge_site=chosen_site,
-                                        endpoint=endpoint,
-                                        request_type="burst",
-                                        response_time_ms=response_time_ms,
-                                        status_code=response.status_code,
-                                        success=success,
-                                        simulated_time=current_time
-                                    )
-                                    
-                        except Exception as e:
-                            response_time_ms = (time.time() - start_time) * 1000
-                            logger.warning(f"Burst request failed for {request_name}: {e}")
-                            
-                            # Log the failed request
-                            if self.generator:
-                                self.generator._log_request(
-                                    app_name=self.app_name,
-                                    app_port=self.app_port,
-                                    edge_site=chosen_site,
-                                    endpoint=endpoint,
-                                    request_type="burst",
-                                    response_time_ms=response_time_ms,
-                                    status_code=0,  # Connection error
-                                    success=False,
-                                    simulated_time=current_time
-                                )
-                        return
-                
-                # Normal site selection with time-based patterns
                 # Build weighted choices for edge sites
                 weighted_sites = []
                 for site_id, site_config in self.edge_sites.items():
@@ -258,13 +161,8 @@ class EdgeRequestGenerator:
                         pattern_name, current_time
                     )
                     
-                    # Apply app-specific phase shift to create different peak times
-                    phase_shifted_multiplier = traffic_multiplier * (1.0 + 0.2 * math.sin(
-                        current_time / 86400 * 2 * 3.14159 + self.traffic_phase
-                    ))
-                    
-                    # Combine site weight with time-based multiplier and app characteristics
-                    final_weight = site_weight * phase_shifted_multiplier * self.burst_volume_factor
+                    # Combine site weight with time-based multiplier
+                    final_weight = site_weight * traffic_multiplier
                     
                     if final_weight > 0:
                         weighted_sites.append({
