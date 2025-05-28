@@ -74,6 +74,7 @@ class K8sDeploymentManager:
         
         self.deployment_dir = self.output_dir # This is the root for workmodel.json, k8parameters.json
         # Save deployment parameters for reproducibility
+        # Note: output_dir is excluded as it should be determined by the deployment directory location
         params = {
             "prefix_yaml_file": self.prefix_yaml_file,
             "namespace": self.namespace,
@@ -86,7 +87,6 @@ class K8sDeploymentManager:
             "nginx_gw": self.nginx_gw,
             "nginx_svc_type": self.nginx_svc_type,
             "no_apply": self.no_apply,
-            "output_dir": self.output_dir,
             "nginx_node_port": self.nginx_node_port,
             "istio_injection": self.istio_injection
         }
@@ -109,10 +109,12 @@ class K8sDeploymentManager:
             params = json.load(f)
         with open(workmodel_path, "r") as f:
             workmodel = json.load(f)
-        # Remove deployment_dir from params to avoid passing it twice
+        # Remove legacy parameters that shouldn't be in the config
         params.pop("deployment_dir", None)
-        # Remove internal_service_functions_path if it exists (legacy parameter)
         params.pop("internal_service_functions_path", None)
+        params.pop("output_dir", None)  # output_dir should be the deployment_dir
+        # Set output_dir to the deployment directory
+        params["output_dir"] = deployment_dir
         instance = cls(workmodel=workmodel, **params)
         instance.deployment_dir = deployment_dir
         return instance

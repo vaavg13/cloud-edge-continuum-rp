@@ -5,6 +5,16 @@ Simple script to run edge computing experiments with metrics collection.
 Creates components and runs a 7-hour experiment simulating 24 hours.
 """
 
+import os
+import sys
+
+# Add the project root to Python path so we can import mu_bench modules
+# This works whether we're running from project root or scripts directory
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)  # Go up one level from scripts/
+sys.path.append(project_root)
+
+# Now import the required modules
 from mu_bench.metrics_exporter.prometheus_exporter import PrometheusExporter
 from mu_bench.request_generator.edge_request_generator import EdgeRequestGenerator
 from mu_bench.experiment_manager import EdgeExperimentManager
@@ -73,7 +83,7 @@ def main():
         prometheus_exporter=prometheus_logger,
         traffic_generator=traffic_generator,
         experiment_name=None,  # Auto-generate
-        output_base_dir="DATA"
+        output_base_dir="DATA"  # Back to relative path since we'll run from project root
     )
     
     # Get edge configuration
