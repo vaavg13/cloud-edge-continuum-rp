@@ -4,6 +4,9 @@ import gevent
 import random
 import requests
 import math
+import csv
+from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse
 
@@ -38,6 +41,11 @@ class EdgeRequestGenerator:
         self.stats_printer_greenlet = None
         self.stop_greenlet = None
         self.user_classes = []
+        
+        # Request logging
+        self.request_log_file = None
+        self.request_log_writer = None
+        self.request_logging_enabled = False
         
         self.logger.info("EdgeRequestGenerator initialized successfully")
     
@@ -118,8 +126,8 @@ class EdgeRequestGenerator:
         # Generate app-specific characteristics for more realistic behavior
         app_hash = hash(app_name)
         app_time_offset = (app_hash % (6 * 3600))  # 0-6 hour offset per app
-        app_burst_base_prob = 0.015 + (app_hash % 100) / 5000  # 0.015-0.035% base burst probability
-        app_burst_volume_factor = 0.5 + (app_hash % 1000) / 2000  # 0.5-1.0 volume multiplier
+        app_burst_base_prob = 0.008 + (app_hash % 100) / 10000  # 0.008-0.018% (reduced from 0.015-0.035%)
+        app_burst_volume_factor = 0.6 + (app_hash % 1000) / 3333  # 0.6-0.9 (reduced from 0.5-1.0)
         app_traffic_phase = (app_hash % 100) / 100.0 * 2 * 3.14159  # Phase shift for traffic patterns
         
         class EdgeUser(HttpUser):
@@ -147,6 +155,11 @@ class EdgeRequestGenerator:
                 instance_hash = hash(f"{app_name}_{id(self)}")
                 self.instance_time_jitter = (instance_hash % 1800)  # 0-30 min per instance
                 self.instance_burst_modifier = 0.8 + (instance_hash % 400) / 1000  # 0.8-1.2 modifier
+                
+                # Reference to parent generator for logging
+                self.generator = None
+                if hasattr(environment, 'generator_instance'):
+                    self.generator = environment.generator_instance
             
             @task(1)
             def hit_edge_site(self):
@@ -169,18 +182,18 @@ class EdgeRequestGenerator:
                 activity_multiplier = min(2.0, 1.0 + self.consecutive_requests / 100)
                 
                 # Add temporal variation to burst probability
-                time_factor = 1.0 + 0.3 * math.sin(current_time / 86400 * 2 * 3.14159 + self.traffic_phase)
+                time_factor = 1.0 + 0.2 * math.sin(current_time / 86400 * 2 * 3.14159 + self.traffic_phase)
                 dynamic_burst_prob = self.burst_probability * activity_multiplier * time_factor * self.instance_burst_modifier
                 
                 # Check for independent app burst
                 is_burst = False
                 if self.burst_cooldown == 0 and random.random() < dynamic_burst_prob:
                     is_burst = True
-                    # Variable burst volume and cooldown
-                    burst_intensity = random.uniform(0.3, 1.0) * self.burst_volume_factor
-                    burst_duration = max(1, int(random.uniform(5, 20) * burst_intensity))
-                    self.burst_cooldown = random.randint(30, 120)  # Variable cooldown
-                    self.consecutive_requests = 0  # Reset activity counter
+                    # Variable burst volume and cooldown (reduced intensity)
+                    burst_intensity = random.uniform(0.2, 0.6) * self.burst_volume_factor
+                    burst_duration = max(1, int(random.uniform(3, 12) * burst_intensity))
+                    self.burst_cooldown = random.randint(60, 180)
+                    self.consecutive_requests = 0
                     
                     # For burst requests, select random sites with higher frequency
                     if random.random() < burst_intensity:
@@ -189,14 +202,48 @@ class EdgeRequestGenerator:
                         endpoint = f"/s0-{chosen_site}"
                         request_name = f"{self.app_port}:{endpoint}:BURST"
                         
+                        start_time = time.time()
                         try:
                             with self.client.get(endpoint, name=request_name, catch_response=True) as response:
-                                if response.status_code == 200:
+                                response_time_ms = (time.time() - start_time) * 1000
+                                success = response.status_code == 200
+                                
+                                if success:
                                     response.success()
                                 else:
                                     response.failure(f"HTTP {response.status_code}")
+                                
+                                # Log the request
+                                if self.generator:
+                                    self.generator._log_request(
+                                        app_name=self.app_name,
+                                        app_port=self.app_port,
+                                        edge_site=chosen_site,
+                                        endpoint=endpoint,
+                                        request_type="burst",
+                                        response_time_ms=response_time_ms,
+                                        status_code=response.status_code,
+                                        success=success,
+                                        simulated_time=current_time
+                                    )
+                                    
                         except Exception as e:
+                            response_time_ms = (time.time() - start_time) * 1000
                             logger.warning(f"Burst request failed for {request_name}: {e}")
+                            
+                            # Log the failed request
+                            if self.generator:
+                                self.generator._log_request(
+                                    app_name=self.app_name,
+                                    app_port=self.app_port,
+                                    edge_site=chosen_site,
+                                    endpoint=endpoint,
+                                    request_type="burst",
+                                    response_time_ms=response_time_ms,
+                                    status_code=0,  # Connection error
+                                    success=False,
+                                    simulated_time=current_time
+                                )
                         return
                 
                 # Normal site selection with time-based patterns
@@ -237,14 +284,48 @@ class EdgeRequestGenerator:
                 endpoint = f"/s0-{chosen_site}"
                 request_name = f"{self.app_port}:{endpoint}"
                 
+                start_time = time.time()
                 try:
                     with self.client.get(endpoint, name=request_name, catch_response=True) as response:
-                        if response.status_code == 200:
+                        response_time_ms = (time.time() - start_time) * 1000
+                        success = response.status_code == 200
+                        
+                        if success:
                             response.success()
                         else:
                             response.failure(f"HTTP {response.status_code}")
+                        
+                        # Log the request
+                        if self.generator:
+                            self.generator._log_request(
+                                app_name=self.app_name,
+                                app_port=self.app_port,
+                                edge_site=chosen_site,
+                                endpoint=endpoint,
+                                request_type="normal",
+                                response_time_ms=response_time_ms,
+                                status_code=response.status_code,
+                                success=success,
+                                simulated_time=current_time
+                            )
+                            
                 except Exception as e:
+                    response_time_ms = (time.time() - start_time) * 1000
                     logger.warning(f"Request failed for {request_name}: {e}")
+                    
+                    # Log the failed request
+                    if self.generator:
+                        self.generator._log_request(
+                            app_name=self.app_name,
+                            app_port=self.app_port,
+                            edge_site=chosen_site,
+                            endpoint=endpoint,
+                            request_type="normal",
+                            response_time_ms=response_time_ms,
+                            status_code=0,  # Connection error
+                            success=False,
+                            simulated_time=current_time
+                        )
         
         # Set class name for debugging
         EdgeUser.__name__ = class_name
@@ -286,7 +367,9 @@ class EdgeRequestGenerator:
         spawn_rate: int = 5,
         run_duration_seconds: float = 300,
         simulated_period_seconds: float = 86400,
-        log_level: str = "INFO"
+        log_level: str = "INFO",
+        enable_request_logging: bool = False,
+        request_log_file: Optional[str] = None
     ) -> bool:
         """
         Run a complete edge computing experiment.
@@ -298,6 +381,8 @@ class EdgeRequestGenerator:
             run_duration_seconds: Experiment duration
             simulated_period_seconds: Simulated time period (for time scaling)
             log_level: Logging level
+            enable_request_logging: Whether to log individual requests to CSV
+            request_log_file: Path to request log file (auto-generated if None)
             
         Returns:
             True if experiment completed successfully
@@ -305,6 +390,13 @@ class EdgeRequestGenerator:
         try:
             # Setup logging
             setup_logging(log_level.upper(), None)
+            
+            # Setup request logging if enabled
+            if enable_request_logging:
+                if not request_log_file:
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    request_log_file = f"edge_requests_{timestamp}.csv"
+                self.enable_request_logging(request_log_file)
             
             # Test connectivity first
             if not self._test_connectivity(edge_config):
@@ -330,11 +422,14 @@ class EdgeRequestGenerator:
             shape_instance = GlobalUserCountShape()
             self.environment = Environment(
                 user_classes=self.user_classes,
-                shape_class=shape_instance
+                shape_class=shape_instance  # Pass the instance, not the class
             )
             
-            # Initialize shared simulated time
-            self.environment.shared_simulated_time = shape_instance.current_simulated_time_seconds
+            # Set generator reference for request logging
+            self.environment.generator_instance = self
+            
+            # Initialize shared simulated time - fix the 'bool' object is not callable error
+            self.environment.shared_simulated_time = GlobalUserCountShape.current_simulated_time_seconds
             
             self.runner = self.environment.create_local_runner()
             
@@ -342,6 +437,9 @@ class EdgeRequestGenerator:
             self.logger.info("🚀 Starting edge computing experiment...")
             self.logger.info(f"📊 Config: {len(edge_config.get('apps', []))} apps, {len(edge_config.get('edge_sites', {}))} edge sites")
             self.logger.info(f"⚙️  Parameters: max_users={max_users}, spawn_rate={spawn_rate}, duration={run_duration_seconds}s")
+            
+            if self.request_logging_enabled:
+                self.logger.info(f"📝 Request logging enabled: {self.request_log_file}")
             
             # Start stats printer
             self.stats_printer_greenlet = gevent.spawn(stats_printer(self.environment.stats))
@@ -362,6 +460,10 @@ class EdgeRequestGenerator:
             self.runner.greenlet.join()
             
             self.logger.info("✅ Edge computing experiment completed successfully!")
+            
+            if self.request_logging_enabled:
+                self.logger.info(f"📊 Request log saved to: {self.request_log_file}")
+            
             return True
             
         except Exception as e:
@@ -396,4 +498,67 @@ class EdgeRequestGenerator:
             'max_response_time': stats.total.max_response_time,
             'requests_per_second': stats.total.current_rps,
             'failure_rate': stats.total.fail_ratio
-        } 
+        }
+    
+    def enable_request_logging(self, output_file: str):
+        """
+        Enable request logging to CSV file for later visualization.
+        
+        Args:
+            output_file: Path to CSV file where requests will be logged
+        """
+        try:
+            self.request_log_file = Path(output_file)
+            self.request_log_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Create CSV file with headers
+            with open(self.request_log_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'timestamp',
+                    'simulated_time_seconds', 
+                    'app_name',
+                    'app_port',
+                    'edge_site',
+                    'endpoint',
+                    'request_type',  # 'normal' or 'burst'
+                    'response_time_ms',
+                    'status_code',
+                    'success'
+                ])
+            
+            self.request_logging_enabled = True
+            self.logger.info(f"✅ Request logging enabled: {self.request_log_file}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to enable request logging: {e}")
+            self.request_logging_enabled = False
+    
+    def _log_request(self, app_name: str, app_port: int, edge_site: str, endpoint: str, 
+                    request_type: str, response_time_ms: float, status_code: int, 
+                    success: bool, simulated_time: float):
+        """Log a request to the CSV file."""
+        if not self.request_logging_enabled or not self.request_log_file:
+            return
+            
+        try:
+            with open(self.request_log_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    datetime.now().isoformat(),
+                    round(simulated_time, 2),
+                    app_name,
+                    app_port,
+                    edge_site,
+                    endpoint,
+                    request_type,
+                    round(response_time_ms, 2),
+                    status_code,
+                    success
+                ])
+        except Exception as e:
+            self.logger.warning(f"Failed to log request: {e}")
+
+    def get_request_log_file(self) -> Optional[Path]:
+        """Get the path to the request log file."""
+        return self.request_log_file if self.request_logging_enabled else None 

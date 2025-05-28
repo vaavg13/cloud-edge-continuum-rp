@@ -18,13 +18,13 @@ def get_edge_config():
             {
                 "name": "iot-sensor-app",  # Different name creates different hash
                 "port": 31116,
-                "traffic_weight": 1.0,
+                "traffic_weight": 1,
                 "wait_time": {"min": 0.3, "max": 1.5}
             },
             {
                 "name": "web-dashboard-app",  # Different name = different behavior
                 "port": 31115,
-                "traffic_weight": 0.9,
+                "traffic_weight": 0.6,
                 "wait_time": {"min": 0.8, "max": 2.5}
             }
         ],

@@ -15,8 +15,8 @@ EDGE_SITE_PATTERNS = {
         "peak_multiplier": 2.5,
         "off_peak_multiplier": 0.3,
         "night_multiplier": 0.1,
-        "burst_probability": 0.18,  # Higher burst probability for urban
-        "burst_strength": [1.2, 4.5]  # Wider range for more variation
+        "burst_probability": 0.12,  # Reduced from 0.18
+        "burst_strength": [1.2, 3.5]  # Reduced max from 4.5
     },
     "suburban_steady": {
         "description": "Suburban area with moderate, steady traffic",
@@ -25,8 +25,8 @@ EDGE_SITE_PATTERNS = {
         "peak_multiplier": 1.8,
         "off_peak_multiplier": 0.5,
         "night_multiplier": 0.2,
-        "burst_probability": 0.12,  # Moderate burst probability
-        "burst_strength": [1.1, 2.8]  # More realistic range
+        "burst_probability": 0.08,  # Reduced from 0.12
+        "burst_strength": [1.1, 2.2]  # Reduced max from 2.8
     },
     "rural_minimal": {
         "description": "Rural area with low, consistent traffic",
@@ -35,8 +35,8 @@ EDGE_SITE_PATTERNS = {
         "peak_multiplier": 1.4,
         "off_peak_multiplier": 0.7,
         "night_multiplier": 0.4,
-        "burst_probability": 0.04,  # Low but not too low
-        "burst_strength": [1.05, 1.8]  # Smaller but varied bursts
+        "burst_probability": 0.03,  # Reduced from 0.04
+        "burst_strength": [1.05, 1.6]  # Reduced max from 1.8
     },
     "industrial_shift": {
         "description": "Industrial area with shift-based patterns",
@@ -45,8 +45,8 @@ EDGE_SITE_PATTERNS = {
         "peak_multiplier": 2.0,
         "off_peak_multiplier": 0.4,
         "night_multiplier": 0.6,  # Night shift activity
-        "burst_probability": 0.08,  # Moderate bursts during shifts
-        "burst_strength": [1.1, 3.2]  # Variable industrial loads
+        "burst_probability": 0.06,  # Reduced from 0.08
+        "burst_strength": [1.1, 2.8]  # Reduced max from 3.2
     },
     "residential_evening": {
         "description": "Residential area with evening and weekend peaks",
@@ -55,8 +55,8 @@ EDGE_SITE_PATTERNS = {
         "peak_multiplier": 2.2,
         "off_peak_multiplier": 0.3,
         "night_multiplier": 0.1,
-        "burst_probability": 0.09,  # Evening streaming/gaming bursts
-        "burst_strength": [1.15, 2.4]  # Home usage patterns
+        "burst_probability": 0.06,  # Reduced from 0.09
+        "burst_strength": [1.15, 2.0]  # Reduced max from 2.4
     },
     "commercial_business": {
         "description": "Commercial district with strict business hours",
@@ -65,8 +65,8 @@ EDGE_SITE_PATTERNS = {
         "peak_multiplier": 3.0,
         "off_peak_multiplier": 0.2,
         "night_multiplier": 0.05,
-        "burst_probability": 0.15,  # Business events cause bursts
-        "burst_strength": [1.3, 3.8]  # Large business-driven spikes
+        "burst_probability": 0.10,  # Reduced from 0.15
+        "burst_strength": [1.3, 3.2]  # Reduced max from 3.8
     }
 }
 
