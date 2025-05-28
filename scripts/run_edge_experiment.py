@@ -1,15 +1,6 @@
-"""
-Minimal Edge Experiment Runner
-
-Simple script to run edge computing experiments with metrics collection.
-Creates components and runs a 7-hour experiment simulating 24 hours.
-"""
-
 import os
 import sys
 
-# Add the project root to Python path so we can import mu_bench modules
-# This works whether we're running from project root or scripts directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)  # Go up one level from scripts/
 sys.path.append(project_root)
