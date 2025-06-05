@@ -22,12 +22,12 @@ def get_edge_config():
                 "traffic_weight": 1,
                 "wait_time": {"min": 0.7, "max": 1.5}
             },
-            # {
-            #     "name": "app-edge-2",  # Different name = different behavior
-            #     "port": 31116,
-            #     "traffic_weight": 0.9,
-            #     "wait_time": {"min": 0.8, "max": 2.5}
-            # },
+            {
+                "name": "app-edge-2",  # Different name = different behavior
+                "port": 31116,
+                "traffic_weight": 0.9,
+                "wait_time": {"min": 0.8, "max": 2.5}
+            },
             # {
             #     "name": "app-edge-3",  # Different name = different behavior
             #     "port": 31117,
@@ -80,16 +80,21 @@ def main():
     # Get edge configuration
     edge_config = get_edge_config()
     
-    # Ask for confirmation
-    response = input("\n🤔 Start 1-hour experiment (simulating 24h)? (y/N): ")
-    if response.lower() != 'y':
-        print("💭 Experiment cancelled.")
-        return
+    # Check if running in interactive mode
+    if sys.stdin.isatty():
+        # Interactive mode - ask for confirmation
+        response = input("\n🤔 Start 10-hour experiment (simulating 24h)? (y/N): ")
+        if response.lower() != 'y':
+            print("💭 Experiment cancelled.")
+            return
+    else:
+        # Non-interactive mode (e.g., nohup) - automatically proceed
+        print("\n🚀 Running in non-interactive mode - starting experiment automatically...")
     
     # Run experiment
     success = experiment_manager.run_experiment(
         edge_config=edge_config,
-        duration_hours=1,        # Real time: 7 hours
+        duration_hours=1,        # Real time: 10 hours
         simulated_hours=24,      # Simulated time: 24 hours
         max_users=40,
         spawn_rate=3
