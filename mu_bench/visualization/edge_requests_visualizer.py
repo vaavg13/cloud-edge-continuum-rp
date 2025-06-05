@@ -43,7 +43,11 @@ class EdgeRequestsVisualizer(BaseVisualizer):
                 self.requests_data = pd.read_csv(requests_file)
                 
                 # Convert timestamp to datetime
-                self.requests_data['timestamp'] = pd.to_datetime(self.requests_data['timestamp'])
+                try:
+                    self.requests_data['timestamp'] = pd.to_datetime(self.requests_data['timestamp'])
+                except ValueError as e:
+                    print(f"Attempting flexible timestamp parsing for edge_requests due to: {e}")
+                    self.requests_data['timestamp'] = pd.to_datetime(self.requests_data['timestamp'], format='ISO8601', errors='coerce')
                 
                 # Create time bins for temporal analysis (5-minute bins)
                 self.requests_data['time_bin'] = self.requests_data['simulated_time_seconds'] // 300

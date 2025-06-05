@@ -128,12 +128,13 @@ class BaseVisualizer(ABC):
 class DataLoader:
     """Handles loading and managing metrics data from CSV files."""
     
-    def __init__(self, metrics_dir, experiment_start_time=None):
+    def __init__(self, metrics_dir, experiment_start_time=None, experiment_cutoff_time=None):
         """Initialize the data loader with the metrics directory path.
         
         Args:
             metrics_dir (str): Path to the metrics directory
             experiment_start_time (pd.Timestamp, optional): Experiment start time for filtering
+            experiment_cutoff_time (pd.Timestamp, optional): Experiment cut-off time for filtering
         """
         self.metrics_dir = Path(metrics_dir)
         if not self.metrics_dir.exists():
@@ -142,6 +143,7 @@ class DataLoader:
         self.data = {}
         self.node_ip_to_zone_map = {}
         self.experiment_start_time = experiment_start_time
+        self.experiment_cutoff_time = experiment_cutoff_time
         self.load_data()
         self.load_node_zone_mapping()
     
@@ -172,23 +174,30 @@ class DataLoader:
                 try:
                     df = pd.read_csv(file_path)
                     if len(df) > 1:  # Check if file has data beyond header
+                        print(f"  Processing {metric_type}: Initial records {len(df)}")
                         # Convert timestamps to datetime (UTC)
                         if 'timestamp' in df.columns:
                             df['datetime'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
                         if 'collection_time' in df.columns:
                             df['collection_datetime'] = pd.to_datetime(df['collection_time'], unit='s', utc=True)
                         
+                        datetime_col_to_filter = None
+                        if 'datetime' in df.columns and not df.empty:
+                            datetime_col_to_filter = 'datetime'
+                        elif 'collection_datetime' in df.columns and not df.empty:
+                            datetime_col_to_filter = 'collection_datetime'
+
                         # Filter by experiment_start_time (timestamps are UTC at this point)
-                        if self.experiment_start_time:
-                            datetime_col_to_filter = None
-                            if 'datetime' in df.columns and not df.empty:
-                                datetime_col_to_filter = 'datetime'
-                            elif 'collection_datetime' in df.columns and not df.empty:
-                                datetime_col_to_filter = 'collection_datetime'
-                            
-                            if datetime_col_to_filter:
-                                records_before_filter = len(df)
-                                df = df[df[datetime_col_to_filter] >= self.experiment_start_time].copy()
+                        if self.experiment_start_time and datetime_col_to_filter:
+                            records_before_filter = len(df)
+                            df = df[df[datetime_col_to_filter] >= self.experiment_start_time].copy()
+                            print(f"    Filtered by start_time ({self.experiment_start_time}): {records_before_filter} -> {len(df)} records")
+                        
+                        # Filter by experiment_cutoff_time (timestamps are UTC at this point)
+                        if self.experiment_cutoff_time and datetime_col_to_filter:
+                            records_before_filter = len(df)
+                            df = df[df[datetime_col_to_filter] <= self.experiment_cutoff_time].copy()
+                            print(f"    Filtered by cutoff_time ({self.experiment_cutoff_time}): {records_before_filter} -> {len(df)} records")
                         
                         # Convert to local timezone for plotting
                         if 'datetime' in df.columns and not df.empty:
@@ -197,13 +206,24 @@ class DataLoader:
                             df['collection_datetime'] = df['collection_datetime'].dt.tz_convert(local_tz_obj)
                         
                         self.data[metric_type] = df
-                        print(f"✓ Loaded {metric_type}: {len(df)} records (filtered by start time if applicable, converted to {local_tz_display_name})")
+                        
+                        filter_log = []
+                        if self.experiment_start_time and datetime_col_to_filter:
+                            filter_log.append("start time")
+                        if self.experiment_cutoff_time and datetime_col_to_filter:
+                            filter_log.append("cutoff time")
+                        
+                        filter_msg = ""
+                        if filter_log:
+                            filter_msg = f" (filtered by {', '.join(filter_log)})"
+                            
+                        print(f"  ✓ Loaded {metric_type}: {len(df)} records{filter_msg}, converted to {local_tz_display_name}")
                     else:
-                        print(f"⚠ {metric_type}: File exists but contains no data")
+                        print(f"  ⚠ {metric_type}: File exists ({filename}) but contains no data or only headers.")
                 except Exception as e:
-                    print(f"✗ Error loading {metric_type}: {e}")
+                    print(f"  ✗ Error loading {metric_type} from {filename}: {e}")
             else:
-                print(f"⚠ {metric_type}: File not found")
+                print(f"  ⚠ {metric_type}: File not found ({filename})")
     
     def load_node_zone_mapping(self):
         """Load node IP to zone mapping using kubectl."""

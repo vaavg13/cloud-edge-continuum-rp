@@ -29,7 +29,7 @@ class MetricsVisualizer:
     and extensibility.
     """
     
-    def __init__(self, experiment_dir, exclude_zones=None):
+    def __init__(self, experiment_dir, exclude_zones=None, cutoff_time=None):
         """Initialize the metrics visualizer with the main experiment directory path.
         
         Args:
@@ -37,6 +37,9 @@ class MetricsVisualizer:
                                   (e.g., '../DATA/edge_experiment_YYYY_MM_DD_HH_MM/')
             exclude_zones (list, optional): List of zone names to exclude from analysis
                                           (e.g., ['Unknown', 'edge-site-2'])
+            cutoff_time (str, optional): A datetime string (e.g., '2023-10-26 15:30:00') 
+                                         to filter out data after this point. 
+                                         Assumed to be in local timezone.
         """
         self.experiment_dir = Path(experiment_dir)
         self.metrics_dir = self.experiment_dir / 'metrics'
@@ -68,8 +71,30 @@ class MetricsVisualizer:
         except Exception as e:
             print(f"⚠️ Error parsing experiment start time from {dir_name}: {e}. Visualizations will not be filtered by start time.")
 
+        # Parse cutoff_time if provided
+        experiment_cutoff_time_utc = None
+        if cutoff_time:
+            try:
+                # Parse as naive datetime first, assuming local timezone
+                dt_obj_naive = datetime.strptime(cutoff_time, '%Y-%m-%d %H:%M:%S')
+                
+                # Convert to pandas Timestamp, then localize and convert to UTC
+                ts_naive = pd.Timestamp(dt_obj_naive)
+                local_tz_info = tzlocal() # Get local tzinfo object
+                ts_local = ts_naive.tz_localize(local_tz_info) # Localize to system's timezone
+                experiment_cutoff_time_utc = ts_local.tz_convert('UTC') # Convert to UTC
+                print(f"🕒 Using cutoff time: {cutoff_time} (local). Converted to UTC for filtering: {experiment_cutoff_time_utc}")
+            except ValueError:
+                print(f"⚠️ Invalid cutoff_time format: '{cutoff_time}'. Please use 'YYYY-MM-DD HH:MM:SS'. Cutoff time will not be applied.")
+            except Exception as e:
+                print(f"⚠️ Error processing cutoff_time '{cutoff_time}': {e}. Cutoff time will not be applied.")
+
         # Initialize data loader with the actual metrics directory path
-        self.data_loader = DataLoader(str(self.metrics_dir), experiment_start_time=experiment_start_time)
+        self.data_loader = DataLoader(
+            str(self.metrics_dir), 
+            experiment_start_time=experiment_start_time,
+            experiment_cutoff_time=experiment_cutoff_time_utc
+        )
         
         # Initialize visualization components
         self.cpu_viz = CPUVisualizer(self.data_loader, exclude_zones)
