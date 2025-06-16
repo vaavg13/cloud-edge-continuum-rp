@@ -13,7 +13,10 @@ import logging
 # logging.basicConfig(level=logging.INFO)
 # logging.getLogger("openai").setLevel(logging.INFO)
 
-openai_key = ()
+openai_key = ('sk-proj-DiA9-QUBGXsMxJGD4khuFmpH9bm7Ww-'
+              'D2hWzAPREKhsQaLf2bcBN1awr32g4kMT63LMmy5kmGeT3BlbkFJQUGUw-'
+              '40noCLugjh0hDoU94R0Iz6BLzAxwRcsybW7CjQS8bOKzhBS2EZp7-'
+              'B3ZmRHNk8znukoA')
 
 def create_sample_config() -> Dict[str, Any]:
     """Create a sample configuration for testing."""
