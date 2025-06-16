@@ -116,6 +116,7 @@ create_k3d_cluster() {
     k3d cluster create "$CLUSTER_NAME" \
         --agents "$TOTAL_AGENTS" \
         --k3s-arg "--disable=traefik@server:*" \
+        --k3s-arg "--disable=metrics-server@server:*" \
         -p "${PROMETHEUS_HOST_PORT}:30000@loadbalancer" \
         -p "${GRAFANA_HOST_PORT}:30001@loadbalancer" \
         -p "${MUBENCH_SERVICE_PORT}:31113@loadbalancer" \

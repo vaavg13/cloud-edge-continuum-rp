@@ -37,9 +37,22 @@ secure_kubeconfig() {
 install_monitoring_stack() {
     secure_kubeconfig
 
+    # --- Metrics Server (install clean one since k3d's is disabled) ---
+    if ! helm repo list | grep -q "^metrics-server"; then
+        echo "→ Adding metrics-server Helm repository"
+        helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+    fi
+    helm repo update
+    helm install metrics-server metrics-server/metrics-server -n kube-system \
+      --set args="{--cert-dir=/tmp,--secure-port=10250,--kubelet-preferred-address-types=InternalIP\,ExternalIP\,Hostname,--kubelet-use-node-status-port,--metric-resolution=15s,--kubelet-insecure-tls}" \
+      --set nodeSelector."topology\.kubernetes\.io/zone"=cloud
+
     # --- Prometheus & Grafana ---
     kubectl create namespace monitoring || true
-    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    if ! helm repo list | grep -q "^prometheus-community"; then
+        echo "→ Adding prometheus-community Helm repository"
+        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    fi
     helm repo update
     helm install prometheus prometheus-community/kube-prometheus-stack -n monitoring \
       --set prometheus.prometheusSpec.nodeSelector."topology\.kubernetes\.io/zone"=cloud \
@@ -53,7 +66,10 @@ install_monitoring_stack() {
 
     # --- Istio ---
     kubectl create namespace istio-system || true
-    helm repo add istio https://istio-release.storage.googleapis.com/charts
+    if ! helm repo list | grep -q "^istio"; then
+        echo "→ Adding istio Helm repository"
+        helm repo add istio https://istio-release.storage.googleapis.com/charts
+    fi
     helm repo update
     helm install istio-base istio/base -n istio-system
     helm install istiod istio/istiod -n istio-system \
@@ -71,7 +87,10 @@ install_monitoring_stack() {
     apply_yaml "jaeger-nodeport.yaml" "" true
 
     # --- Kiali ---
-    helm repo add kiali https://kiali.org/helm-charts
+    if ! helm repo list | grep -q "^kiali"; then
+        echo "→ Adding kiali Helm repository"
+        helm repo add kiali https://kiali.org/helm-charts
+    fi
     helm repo update
     helm install -n istio-system -f "$MANIFEST_DIR/kiali-values.yaml" kiali-server kiali/kiali-server
 
