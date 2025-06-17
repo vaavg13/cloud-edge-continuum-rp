@@ -140,8 +140,10 @@ class PrometheusMetricsTool:
         
         return {"status": "success", "data": results}
     
-    def get_current_istio_latency(self, namespace: Optional[str] = None, percentile="0.95", rate_window="1m") -> Dict[str, Any]:
+    def get_current_istio_latency(self, namespace: Optional[str] = None, percentile="0.95", rate_window="5m") -> Dict[str, Any]:
         """Get current Istio latency metrics for services."""
+        import math
+        
         # Build namespace filter
         if namespace:
             namespace_filter = f'destination_workload_namespace="{namespace}"'
@@ -150,28 +152,50 @@ class PrometheusMetricsTool:
         else:
             full_selector = 'reporter="destination"'
         
+        # Try histogram quantile first (with longer 5m window)
         query = f'''histogram_quantile({percentile},
             sum(rate(istio_request_duration_milliseconds_bucket{{{full_selector}}}[{rate_window}]))
             by (le, destination_workload, destination_workload_namespace)
         )'''
         data = self.exporter._query_prometheus(query)
         
-        if not data or data.get('status') != 'success':
-            return {"error": "Failed to query Istio latency metrics", "data": []}
-        
         results = []
-        for item in data['data']['result']:
-            pod_name_val = item['metric'].get('destination_workload', 'unknown_pod')
-            namespace_val = item['metric'].get('destination_workload_namespace', 'unknown_namespace')
-            latency_ms = float(item['value'][1])
-            
-            if latency_ms != float('inf'):  # Filter out +Inf values
-                results.append({
-                    "namespace": namespace_val,
-                    "workload": pod_name_val,
-                    "p95_latency_ms": round(latency_ms, 2),
-                    "timestamp": format_timestamp(float(item['value'][0]))
-                })
+        
+        if data and data.get('status') == 'success':
+            for item in data['data']['result']:
+                pod_name_val = item['metric'].get('destination_workload', 'unknown_pod')
+                namespace_val = item['metric'].get('destination_workload_namespace', 'unknown_namespace')
+                latency_ms = float(item['value'][1])
+                
+                # If histogram quantile gives valid result, use it
+                if not (math.isnan(latency_ms) or latency_ms == float('inf')):
+                    results.append({
+                        "namespace": namespace_val,
+                        "workload": pod_name_val,
+                        "p95_latency_ms": round(latency_ms, 2),
+                        "timestamp": format_timestamp(float(item['value'][0]))
+                    })
+                else:
+                    # Fall back to average latency if histogram quantile fails
+                    avg_query = f'''rate(istio_request_duration_milliseconds_sum{{
+                        {full_selector}, destination_workload="{pod_name_val}"
+                    }}[{rate_window}]) / rate(istio_requests_total{{
+                        {full_selector}, destination_workload="{pod_name_val}"
+                    }}[{rate_window}])'''
+                    
+                    avg_data = self.exporter._query_prometheus(avg_query)
+                    if avg_data and avg_data.get('status') == 'success' and avg_data['data']['result']:
+                        avg_latency = float(avg_data['data']['result'][0]['value'][1])
+                        if not (math.isnan(avg_latency) or avg_latency == float('inf')):
+                            results.append({
+                                "namespace": namespace_val,
+                                "workload": pod_name_val,
+                                "p95_latency_ms": round(avg_latency, 2),  # Using average as fallback
+                                "timestamp": format_timestamp(float(item['value'][0]))
+                            })
+        
+        if not results:
+            return {"error": "Failed to query Istio latency metrics", "data": []}
         
         return {"status": "success", "data": results}
     

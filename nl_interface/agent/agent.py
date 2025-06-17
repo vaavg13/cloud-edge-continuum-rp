@@ -9,14 +9,14 @@ import json
 import time
 import openai
 from typing import Dict, Any, List
-from mcp_client import MCPClient
-from tool_schemas import get_kubernetes_function_schemas, get_system_prompt
-from prometheus_tool import (
+from .mcp_client import MCPClient
+from .tool_schemas import get_kubernetes_function_schemas, get_system_prompt
+from .prometheus_tool import (
     prometheus_get_node_cpu, prometheus_get_node_memory,
     prometheus_get_pod_cpu, prometheus_get_pod_memory,
     prometheus_get_istio_latency, prometheus_get_metrics_summary
 )
-from config import OPENAI_API_KEY, OPENAI_MODEL
+from .config import OPENAI_API_KEY, OPENAI_MODEL
 
 class KubernetesAgent:
     """
