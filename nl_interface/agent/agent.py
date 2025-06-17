@@ -9,8 +9,13 @@ import json
 import time
 import openai
 from typing import Dict, Any, List
-from nl_interface.agent.mcp_client import MCPClient
-from kubernetes_tool_schemas import get_kubernetes_function_schemas, get_system_prompt
+from mcp_client import MCPClient
+from tool_schemas import get_kubernetes_function_schemas, get_system_prompt
+from prometheus_tool import (
+    prometheus_get_node_cpu, prometheus_get_node_memory,
+    prometheus_get_pod_cpu, prometheus_get_pod_memory,
+    prometheus_get_istio_latency, prometheus_get_metrics_summary
+)
 from config import OPENAI_API_KEY, OPENAI_MODEL
 
 class KubernetesAgent:
@@ -62,10 +67,50 @@ class KubernetesAgent:
         try:
             result = await self.mcp_client.call_tool(function_name, parameters)
             print(f"✅ MCP call completed")
+            # print(json.dumps(result, indent=2))
             return result
         except Exception as e:
             error_result = {"error": f"MCP call failed: {str(e)}"}
             print(f"❌ MCP call failed: {e}")
+            # print(json.dumps(error_result, indent=2))
+            return error_result
+    
+    async def call_prometheus_function(self, function_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Call Prometheus metrics function.
+        
+        Args:
+            function_name: Name of the prometheus function to call
+            parameters: Parameters for the function
+            
+        Returns:
+            Result from Prometheus query
+        """
+        print(f"📊 Calling Prometheus: {function_name} with {json.dumps(parameters, indent=2)}")
+        
+        try:
+            # Map function names to actual functions
+            function_map = {
+                "prometheus_get_node_cpu": prometheus_get_node_cpu,
+                "prometheus_get_node_memory": prometheus_get_node_memory,
+                "prometheus_get_pod_cpu": prometheus_get_pod_cpu,
+                "prometheus_get_pod_memory": prometheus_get_pod_memory,
+                "prometheus_get_istio_latency": prometheus_get_istio_latency,
+                "prometheus_get_metrics_summary": prometheus_get_metrics_summary
+            }
+            
+            func = function_map.get(function_name)
+            if not func:
+                return {"error": f"Unknown Prometheus function: {function_name}"}
+            
+            # Call the function with parameters
+            result = func(**parameters)
+            print(f"✅ Prometheus call completed")
+            return result
+            
+        except Exception as e:
+            error_result = {"error": f"Prometheus call failed: {str(e)}"}
+            print(f"❌ Prometheus call failed: {e}")
             return error_result
     
     async def ask_llm_step(self, context: List[str]) -> Dict[str, Any]:
@@ -89,23 +134,8 @@ class KubernetesAgent:
             {"role": "user", "content": f"Based on the following context, what should you do next?\n\n{context_text}"}
         ]
         
-        # Get detailed functions from kubernetes_tool_schemas plus sleep
-        functions = get_kubernetes_function_schemas() + [
-            {
-                "name": "sleep_seconds",
-                "description": "Wait for a specified number of seconds",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "duration": {
-                            "type": "number",
-                            "description": "Number of seconds to sleep"
-                        }
-                    },
-                    "required": ["duration"]
-                }
-            }
-        ]
+        # Get all available functions from tool schemas
+        functions = get_kubernetes_function_schemas()
         
         try:
             response = await self.openai_client.chat.completions.create(
@@ -171,9 +201,21 @@ class KubernetesAgent:
                 
                 if func_name in [
                     "kubectl_apply", "kubectl_get", "kubectl_delete", 
-                    "kubectl_list", "kubectl_scale", "kubectl_patch"
+                    "kubectl_list", "kubectl_scale", "kubectl_patch",
+                    "kubectl_describe", "kubectl_logs", "kubectl_rollout"
                 ]:
                     result = await self.call_mcp(func_name, args)
+                    action = f"Executed {func_name}: {args}"
+                    context.append(action)
+                    context.append(f"Result: {json.dumps(result, indent=2)}")
+                    actions_taken.append(action)
+                
+                elif func_name in [
+                    "prometheus_get_node_cpu", "prometheus_get_node_memory",
+                    "prometheus_get_pod_cpu", "prometheus_get_pod_memory", 
+                    "prometheus_get_istio_latency", "prometheus_get_metrics_summary"
+                ]:
+                    result = await self.call_prometheus_function(func_name, args)
                     action = f"Executed {func_name}: {args}"
                     context.append(action)
                     context.append(f"Result: {json.dumps(result, indent=2)}")

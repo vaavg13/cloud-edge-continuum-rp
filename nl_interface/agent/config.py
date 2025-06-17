@@ -4,14 +4,14 @@ Configuration settings for the Kubernetes Agent.
 """
 
 import os
+from dotenv import load_dotenv
 
 # OpenAI API key (can be overridden by environment variable)
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', 
-    'sk-proj-DiA9-QUBGXsMxJGD4khuFmpH9bm7Ww-'
-    'D2hWzAPREKhsQaLf2bcBN1awr32g4kMT63LMmy5kmGeT3BlbkFJQUGUw-'
-    '40noCLugjh0hDoU94R0Iz6BLzAxwRcsybW7CjQS8bOKzhBS2EZp7-'
-    'B3ZmRHNk8znukoA'
-)
+# Load environment variables from .env file
+load_dotenv()
+
+# Access environment variable
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # MCP Server configuration
 MCP_SERVER_COMMAND = ["npx", "mcp-server-kubernetes"]
@@ -21,7 +21,7 @@ OPENAI_MODEL = "gpt-4.1"
 OPENAI_MAX_TOKENS = 4096
 
 # Default deployment settings for demos
-DEFAULT_DEPLOYMENT_NAME = "s0-edge-site-1"
+DEFAULT_DEPLOYMENT_NAME = "s0-edge-site-2"
 DEFAULT_NAMESPACE = "app-edge-2"
 
 # Agent behavior settings
