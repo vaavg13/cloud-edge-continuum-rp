@@ -6,6 +6,33 @@ Defines all available Kubernetes operations that an AI agent can perform through
 
 from typing import List, Dict, Any
 
+SYSTEM_PROMPT = """You are a Kubernetes administrator assistant working in an agent loop. You have access to specific kubectl operations as individual functions.
+
+Available kubectl functions:
+- kubectl_get: Get specific resources (requires: resourceType; optional: name, namespace, output)
+- kubectl_list: List resources of a type (requires: resourceType; optional: namespace, allNamespaces)
+- kubectl_patch: Modify existing resources (requires: resourceType, name, patchData; optional: namespace, patchType, dryRun)
+- kubectl_apply: Apply manifests (requires: manifest; optional: namespace, dryRun)
+- kubectl_delete: Remove resources (requires: resourceType, name; optional: namespace, force)
+- kubectl_scale: Scale deployments (requires: name, replicas; optional: namespace, resourceType)
+
+Example operations:
+
+Checking pod status:
+kubectl_get(resourceType="pod", name="my-pod", namespace="default")
+
+Listing all services across namespaces:
+kubectl_list(resourceType="service", allNamespaces=true)
+
+Updating a deployment's image:
+kubectl_patch(resourceType="deployment", name="my-app", patchData={"spec": {"template": {"spec": {"containers": [{"name": "app", "image": "nginx:1.21"}]}}}})
+
+Applying a new resource:
+kubectl_apply(manifest="apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test")
+
+You should analyze the situation, determine what information you need, and choose appropriate kubectl operations to accomplish your goals.
+""" 
+
 def get_kubernetes_function_schemas() -> List[Dict[str, Any]]:
     """
     Get all available Kubernetes function schemas for OpenAI function calling.
@@ -174,29 +201,4 @@ def get_system_prompt() -> str:
     """
     Get the system prompt that describes the AI agent's capabilities.
     """
-    return """You are a Kubernetes administrator assistant working in an agent loop. You have access to kubectl operations through the kubectl_action function.
-
-Available kubectl functions:
-- kubectl_get: Get specific resources 
-- kubectl_list: List resources of a type
-- kubectl_patch: Modify existing resources
-- kubectl_apply: Apply manifests
-- kubectl_delete: Remove resources
-- kubectl_scale: Scale deployments
-
-Each kubectl_action requires:
-1. function: The kubectl operation name
-2. parameters: Object with required fields for that operation
-
-Example operations:
-
-Checking pod status:
-kubectl_action with function="kubectl_get", parameters={"resourceType": "pod", "name": "my-pod", "namespace": "default"}
-
-Listing all services:
-kubectl_action with function="kubectl_list", parameters={"resourceType": "service", "allNamespaces": true}
-
-Updating a deployment's image:
-kubectl_action with function="kubectl_patch", parameters={"resourceType": "deployment", "name": "my-app", "patchData": {"spec": {"template": {"spec": {"containers": [{"name": "app", "image": "nginx:1.21"}]}}}}}
-
-You should analyze the situation, determine what information you need, and choose appropriate kubectl operations to accomplish your goals.""" 
+    return SYSTEM_PROMPT

@@ -9,7 +9,7 @@ import json
 import time
 import openai
 from typing import Dict, Any, List
-from client import MCPClient
+from nl_interface.agent.mcp_client import MCPClient
 from kubernetes_tool_schemas import get_kubernetes_function_schemas, get_system_prompt
 from config import OPENAI_API_KEY, OPENAI_MODEL
 
@@ -43,21 +43,19 @@ class KubernetesAgent:
         
         self.is_initialized = True
     
-    async def call_mcp(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    async def call_mcp(self, function_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Call MCP server with kubectl action.
+        Call MCP server with kubectl function.
         
         Args:
-            args: Arguments containing function name and parameters
+            function_name: Name of the kubectl function to call
+            parameters: Parameters for the function
             
         Returns:
             Result from MCP server
         """
         if not self.is_initialized:
             raise RuntimeError("Agent not initialized. Call initialize() first.")
-        
-        function_name = args.get("function")
-        parameters = args.get("parameters", {})
         
         print(f"🔧 Calling MCP: {function_name} with {json.dumps(parameters, indent=2)}")
         
@@ -88,56 +86,11 @@ class KubernetesAgent:
         
         messages = [
             {"role": "system", "content": get_system_prompt()},
-            {"role": "user", "content": f"Based on the following context, what should I do next?\n\n{context_text}"}
+            {"role": "user", "content": f"Based on the following context, what should you do next?\n\n{context_text}"}
         ]
         
-        # Define available functions for the agent loop
-        functions = [
-            {
-                "name": "kubectl_action",
-                "description": "Execute a kubectl command through the MCP server. You must provide specific parameters for each kubectl function.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "function": {
-                            "type": "string",
-                            "description": "kubectl function to call",
-                            "enum": ["kubectl_get", "kubectl_list", "kubectl_patch", "kubectl_apply", "kubectl_delete", "kubectl_scale"]
-                        },
-                        "parameters": {
-                            "type": "object",
-                            "description": "Parameters for the kubectl function - must include required fields like resourceType for kubectl_get",
-                            "properties": {
-                                "resourceType": {
-                                    "type": "string",
-                                    "description": "Type of Kubernetes resource (e.g., 'hpa', 'deployment', 'pod')"
-                                },
-                                "name": {
-                                    "type": "string", 
-                                    "description": "Name of the specific resource"
-                                },
-                                "namespace": {
-                                    "type": "string",
-                                    "description": "Namespace for the resource"
-                                },
-                                "output": {
-                                    "type": "string",
-                                    "description": "Output format (json, yaml, wide)"
-                                },
-                                "patchData": {
-                                    "type": "object",
-                                    "description": "Patch data for kubectl_patch operations"
-                                },
-                                "patchType": {
-                                    "type": "string",
-                                    "description": "Type of patch (merge, strategic, json)"
-                                }
-                            }
-                        }
-                    },
-                    "required": ["function", "parameters"]
-                }
-            },
+        # Get detailed functions from kubernetes_tool_schemas plus sleep
+        functions = get_kubernetes_function_schemas() + [
             {
                 "name": "sleep_seconds",
                 "description": "Wait for a specified number of seconds",
@@ -216,9 +169,12 @@ class KubernetesAgent:
                 func_name = llm_msg["function_call"]["name"]
                 args = llm_msg["function_call"]["arguments"]
                 
-                if func_name == "kubectl_action":
-                    result = await self.call_mcp(args)
-                    action = f"Executed: {args}"
+                if func_name in [
+                    "kubectl_apply", "kubectl_get", "kubectl_delete", 
+                    "kubectl_list", "kubectl_scale", "kubectl_patch"
+                ]:
+                    result = await self.call_mcp(func_name, args)
+                    action = f"Executed {func_name}: {args}"
                     context.append(action)
                     context.append(f"Result: {json.dumps(result, indent=2)}")
                     actions_taken.append(action)

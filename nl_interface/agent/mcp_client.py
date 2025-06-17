@@ -70,18 +70,3 @@ class MCPClient:
                 # If anything fails during cleanup, just ignore it
                 # This prevents the "event loop is closed" error
                 pass
-
-if __name__ == "__main__":
-    async def test():
-        client = MCPClient(["npx", "mcp-server-kubernetes"])
-        try:
-            await client.start()
-            await client.initialize()
-            
-            # Test listing namespaces
-            response = await client.call_tool("kubectl_list", {"resourceType": "namespaces"})
-            print(json.dumps(response, indent=2))
-        finally:
-            await client.stop()
-    
-    asyncio.run(test()) 
