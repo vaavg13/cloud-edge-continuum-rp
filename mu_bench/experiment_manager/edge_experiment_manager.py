@@ -7,12 +7,8 @@ import logging
 import time
 import signal
 import sys
-import asyncio
-import threading
 from datetime import datetime, timezone
 from pathlib import Path
-
-from mu_bench.request_generator.edge_request_generator import EdgeRequestGenerator
 
 
 class CompactFormatter(logging.Formatter):
@@ -49,7 +45,7 @@ class ColoredFormatter(logging.Formatter):
 
 
 class EdgeExperimentManager:
-    def __init__(self, prometheus_exporter, traffic_generator: EdgeRequestGenerator, 
+    def __init__(self, prometheus_exporter, traffic_generator, 
                  experiment_name=None, output_base_dir="DATA", quiet_mode=True):
         """
         Initialize the experiment manager.
@@ -99,11 +95,6 @@ class EdgeExperimentManager:
         # Experiment control
         self.is_running = False
         self.setup_signal_handlers()
-        
-        # Async support
-        self._background_task = None
-        self._background_result = None
-        self._background_exception = None
         
     def setup_logging(self):
         """Setup logging to both file and console."""
@@ -194,6 +185,9 @@ class EdgeExperimentManager:
                 spawn_rate=spawn_rate,
                 run_duration_seconds=duration_hours * 60 * 60,
                 simulated_period_seconds=simulated_hours * 60 * 60,
+                log_level="INFO",
+                enable_request_logging=enable_request_logging,
+                request_log_file=request_log_file
             )
             
             self.is_running = False
@@ -213,123 +207,10 @@ class EdgeExperimentManager:
             # Always stop metrics collection
             self._stop_metrics_collection()
     
-    async def run_experiment_async(self, edge_config, duration_hours=7, simulated_hours=24, 
-                                  max_users=15, spawn_rate=3, enable_request_logging=True):
-        """
-        Run experiment asynchronously in a background thread.
-        
-        Args:
-            Same as run_experiment()
-            
-        Returns:
-            bool: True if experiment completed successfully
-        """
-        if self._background_task and not self._background_task.done():
-            self.logger.warning("Async experiment is already running!")
-            return False
-        
-        def _run_in_thread():
-            """Internal function to run experiment in thread."""
-            try:
-                result = self.run_experiment(
-                    edge_config=edge_config,
-                    duration_hours=duration_hours,
-                    simulated_hours=simulated_hours,
-                    max_users=max_users,
-                    spawn_rate=spawn_rate,
-                    enable_request_logging=enable_request_logging
-                )
-                self._background_result = result
-                return result
-            except Exception as e:
-                self._background_exception = e
-                self.logger.error(f"Background experiment failed: {e}")
-                return False
-        
-        # Run experiment in background thread
-        loop = asyncio.get_event_loop()
-        self._background_task = loop.run_in_executor(None, _run_in_thread)
-        
-        # Wait a moment for experiment to start
-        await asyncio.sleep(1)
-        return True
-    
-    async def start_background_experiment(self, edge_config, duration_hours=7, simulated_hours=24, 
-                                         max_users=15, spawn_rate=3, enable_request_logging=True):
-        """
-        Start experiment in background and return immediately.
-        
-        Returns:
-            bool: True if experiment started successfully
-        """
-        return await self.run_experiment_async(
-            edge_config=edge_config,
-            duration_hours=duration_hours,
-            simulated_hours=simulated_hours,
-            max_users=max_users,
-            spawn_rate=spawn_rate,
-            enable_request_logging=enable_request_logging
-        )
-    
-    async def wait_for_completion(self):
-        """
-        Wait for background experiment to complete.
-        
-        Returns:
-            bool: True if experiment completed successfully
-        """
-        if not self._background_task:
-            self.logger.warning("No background experiment running!")
-            return False
-        
-        try:
-            result = await self._background_task
-            return result
-        except Exception as e:
-            self.logger.error(f"Background experiment failed: {e}")
-            return False
-    
-    def is_running_async(self):
-        """
-        Check if an async experiment is currently running.
-        
-        Returns:
-            bool: True if async experiment is running
-        """
-        return (self._background_task and 
-                not self._background_task.done() and 
-                self.is_running)
-    
-    def get_background_result(self):
-        """
-        Get the result of background experiment (non-blocking).
-        
-        Returns:
-            tuple: (is_complete, result, exception)
-        """
-        if not self._background_task:
-            return False, None, None
-        
-        is_complete = self._background_task.done()
-        
-        if is_complete:
-            try:
-                result = self._background_task.result()
-                return True, result, self._background_exception
-            except Exception as e:
-                return True, False, e
-        
-        return False, None, None
-
     def stop_experiment(self):
         """Stop the experiment gracefully."""
         self.logger.info("🛑 Stopping experiment...")
         self.is_running = False
-        
-        # Cancel background task if running
-        if self._background_task and not self._background_task.done():
-            self._background_task.cancel()
-            
         self._stop_metrics_collection()
     
     def _stop_metrics_collection(self):
