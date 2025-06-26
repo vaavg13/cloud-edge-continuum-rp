@@ -12,7 +12,8 @@ from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime, timezone
 
 from .config_schema import DriftMonitorConfig, ThresholdConfig
-from .metric_evaluator import MetricEvaluator, MetricViolation
+from .metric_evaluator import MetricEvaluator
+from ..shared.types import MetricViolation
 
 logger = logging.getLogger(__name__)
 
@@ -116,18 +117,10 @@ class DriftMonitor:
             
             result = {
                 "violations_found": len(violations),
-                "violations": [
-                    {
-                        "metric_type": v.threshold.metric_type.value,
-                        "actual_value": v.actual_value,
-                        "threshold_value": v.threshold.threshold_value,
-                        "operator": v.threshold.operator.value,
-                        "description": v.threshold.description
-                    } for v in violations
-                ]
+                "violations": violations  # Return the full MetricViolation objects
             }
             
-            # Call violation callback if provided
+            # Call violation callback if provided (for backward compatibility)
             if violations and self.violation_callback:
                 try:
                     callback_result = await self.violation_callback(violations)
@@ -145,23 +138,4 @@ class DriftMonitor:
         await self.stop()
 
 
-def create_monitor_with_agent_actions(config: DriftMonitorConfig, intent_template: str = None) -> DriftMonitor:
-    """
-    Create a DriftMonitor with ActionExecutor as violation callback.
-    This eliminates the need for the bridge layer.
-    
-    Args:
-        config: DriftMonitorConfig for the monitor
-        intent_template: Simple template for agent intent (optional)
-                        Can use variables like: {namespace}, {metric_type}, {metric_value}, etc.
-        
-    Returns:
-        DriftMonitor instance with agent actions enabled
-    """
-    from ..agent.action_executor import ActionExecutor
-    
-    # Create action executor with simple intent template
-    action_executor = ActionExecutor(intent_template)
-    
-    # Use ActionExecutor.call_agent_for_violations as the violation callback
-    return DriftMonitor(config, violation_callback=action_executor.call_agent_for_violations) 
+ 

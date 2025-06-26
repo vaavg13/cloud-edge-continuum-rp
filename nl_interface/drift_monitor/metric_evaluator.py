@@ -6,27 +6,13 @@ Evaluates metrics against configured thresholds and detects violations.
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone
 import logging
-from .config_schema import MetricType, ComparisonOperator, ThresholdConfig, DriftMonitorConfig
-from ..agent.prometheus_tool import PrometheusMetricsTool
+from .config_schema import ThresholdConfig, DriftMonitorConfig  
+from ..shared.types import MetricType, ComparisonOperator, MetricViolation
+from ..shared.prometheus_client import PrometheusMetricsTool
 
 logger = logging.getLogger(__name__)
 
-class MetricViolation:
-    """Represents a metric threshold violation."""
-    
-    def __init__(self, loop_id: str, namespace: str, pod_name: Optional[str], 
-                 threshold: ThresholdConfig, actual_value: float, timestamp: datetime):
-        self.loop_id = loop_id
-        self.namespace = namespace
-        self.pod_name = pod_name
-        self.threshold = threshold
-        self.actual_value = actual_value
-        self.timestamp = timestamp
-        
-    def __str__(self):
-        target = f"{self.namespace}/{self.pod_name}" if self.pod_name else self.namespace
-        return (f"Violation in {self.loop_id}: {target} {self.threshold.metric_type.value} "
-                f"{self.actual_value} {self.threshold.operator.value} {self.threshold.threshold_value}")
+
 
 class ViolationTracker:
     """Tracks consecutive violations for each monitoring loop."""
@@ -36,7 +22,7 @@ class ViolationTracker:
         
     def add_violation(self, violation: MetricViolation) -> int:
         """Add a violation and return consecutive count."""
-        key = f"{violation.loop_id}_{violation.threshold.metric_type.value}"
+        key = f"{violation.loop_id}_{violation.metric_type.value}"
         if key not in self._violations:
             self._violations[key] = []
         
@@ -85,7 +71,7 @@ class MetricEvaluator:
             raise ValueError(f"Unsupported operator: {operator}")
     
     def _get_metric_values(self, metric_type: MetricType, namespace: str, 
-                          pod_name: Optional[str] = None) -> List[Dict[str, Any]]:
+                          deployment_name: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get current metric values from Prometheus."""
         try:
             if metric_type == MetricType.POD_CPU:
@@ -108,11 +94,13 @@ class MetricEvaluator:
             
             metrics = result.get("data", [])
             
-            # Filter by pod name if specified
-            if pod_name and metric_type in [MetricType.POD_CPU, MetricType.POD_MEMORY]:
-                metrics = [m for m in metrics if m.get("pod") == pod_name]
-            elif pod_name and metric_type == MetricType.ISTIO_LATENCY:
-                metrics = [m for m in metrics if m.get("workload") == pod_name]
+            # Filter by deployment name if specified (filter pods that belong to the deployment)
+            if deployment_name and metric_type in [MetricType.POD_CPU, MetricType.POD_MEMORY]:
+                # For pod metrics, filter by pods that start with deployment name
+                metrics = [m for m in metrics if m.get("pod", "").startswith(deployment_name)]
+            elif deployment_name and metric_type == MetricType.ISTIO_LATENCY:
+                # For istio metrics, workload corresponds to deployment name
+                metrics = [m for m in metrics if m.get("workload") == deployment_name]
             
             return metrics
             
@@ -147,7 +135,7 @@ class MetricEvaluator:
             metric_values = self._get_metric_values(
                 threshold.metric_type, 
                 loop_config.namespace, 
-                loop_config.pod_name
+                loop_config.deployment_name
             )
             
             if not metric_values:
@@ -164,10 +152,15 @@ class MetricEvaluator:
                     violation = MetricViolation(
                         loop_id=loop_config.loop_id,
                         namespace=loop_config.namespace,
-                        pod_name=loop_config.pod_name or metric_data.get("pod") or metric_data.get("workload"),
-                        threshold=threshold,
+                        deployment_name=loop_config.deployment_name or metric_data.get("workload") or metric_data.get("pod", "").split("-")[0],
+                        metric_type=threshold.metric_type,
                         actual_value=actual_value,
-                        timestamp=now
+                        threshold_value=threshold.threshold_value,
+                        operator=threshold.operator,
+                        unit=threshold.unit,
+                        description=threshold.description,
+                        timestamp=now,
+                        consecutive_violations=threshold.consecutive_violations
                     )
                     
                     # Track consecutive violations
@@ -175,6 +168,7 @@ class MetricEvaluator:
                     
                     # Only add to violations if we've reached the required consecutive count
                     if consecutive_count >= threshold.consecutive_violations:
+                        violation.consecutive_violations = consecutive_count
                         violations.append(violation)
                         logger.warning(f"Threshold violation detected: {violation}")
                 else:
@@ -183,11 +177,11 @@ class MetricEvaluator:
         
         return violations
     
-    def get_current_metrics_summary(self, namespace: str, pod_name: Optional[str] = None) -> Dict[str, Any]:
-        """Get a summary of current metrics for a namespace/pod."""
+    def get_current_metrics_summary(self, namespace: str, deployment_name: Optional[str] = None) -> Dict[str, Any]:
+        """Get a summary of current metrics for a namespace/deployment."""
         summary = {
             "namespace": namespace,
-            "pod_name": pod_name,
+            "deployment_name": deployment_name,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "metrics": {}
         }
@@ -195,7 +189,7 @@ class MetricEvaluator:
         # Get all metric types
         for metric_type in MetricType:
             try:
-                values = self._get_metric_values(metric_type, namespace, pod_name)
+                values = self._get_metric_values(metric_type, namespace, deployment_name)
                 if values:
                     # Aggregate values if multiple pods/nodes
                     if metric_type in [MetricType.POD_CPU, MetricType.POD_MEMORY]:

@@ -1,12 +1,12 @@
 """
 Drift Monitor Package
-Simplified monitoring system that directly integrates with agent actions.
+Pure monitoring system for detecting metric violations.
 """
 
-from .config_schema import DriftMonitorConfig, ThresholdConfig, MetricType, ComparisonOperator
-from .monitor_manager import DriftMonitor, create_monitor_with_agent_actions
-from .metric_evaluator import MetricEvaluator, MetricViolation
-from .config_templates import create_simple_config, create_simple_intent_templates
+from .config_schema import DriftMonitorConfig, ThresholdConfig
+from .monitor_manager import DriftMonitor
+from .metric_evaluator import MetricEvaluator
+from ..shared.types import MetricViolation, MetricType, ComparisonOperator
 
 __all__ = [
     # Core classes
@@ -18,10 +18,5 @@ __all__ = [
     
     # Enums
     'MetricType',
-    'ComparisonOperator',
-    
-    # Convenience functions
-    'create_monitor_with_agent_actions',
-    'create_simple_config',
-    'create_simple_intent_templates'
+    'ComparisonOperator'
 ]

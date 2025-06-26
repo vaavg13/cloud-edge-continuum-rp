@@ -5,24 +5,8 @@ Defines the structure and validation for monitoring configurations.
 
 from typing import Dict, List, Optional, Union, Any
 from pydantic import BaseModel, Field, field_validator
-from enum import Enum
 
-class MetricType(str, Enum):
-    """Supported metric types for monitoring."""
-    POD_CPU = "pod_cpu"
-    POD_MEMORY = "pod_memory" 
-    NODE_CPU = "node_cpu"
-    NODE_MEMORY = "node_memory"
-    ISTIO_LATENCY = "istio_latency"
-
-class ComparisonOperator(str, Enum):
-    """Comparison operators for threshold evaluation."""
-    GREATER_THAN = ">"
-    LESS_THAN = "<"
-    GREATER_EQUAL = ">="
-    LESS_EQUAL = "<="
-    EQUAL = "=="
-    NOT_EQUAL = "!="
+from ..shared.types import MetricType, ComparisonOperator
 
 class ThresholdConfig(BaseModel):
     """Configuration for a single metric threshold."""
@@ -43,7 +27,7 @@ class DriftMonitorConfig(BaseModel):
     # Single monitoring loop configuration
     loop_id: str = Field(..., description="Unique identifier for this monitoring loop")
     namespace: str = Field(..., description="Kubernetes namespace to monitor (required)")
-    pod_name: Optional[str] = Field(None, description="Specific pod name to monitor (optional)")
+    deployment_name: Optional[str] = Field(None, description="Specific deployment name to monitor (optional)")
     thresholds: List[ThresholdConfig] = Field(..., description="List of thresholds to monitor")
     check_interval_seconds: int = Field(60, description="Interval between metric checks in seconds")
     enabled: bool = Field(True, description="Whether this monitoring loop is enabled")
