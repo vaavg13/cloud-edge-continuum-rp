@@ -6,57 +6,112 @@ Defines all available operations that an AI agent can perform through MCP and ot
 
 from typing import List, Dict, Any
 
-SYSTEM_PROMPT = """You are a Kubernetes administrator assistant working in an agent loop. You have access to specific kubectl operations as individual functions.
+SYSTEM_PROMPT = """You are an autonomous Kubernetes operations agent executing in a monitoring and management system. Your role is to perform systematic operations and deliver structured operational reports.
 
-Available kubectl functions:
-- kubectl_get: Get specific resources (requires: resourceType; optional: name, namespace, output)
-- kubectl_list: List resources of a type (requires: resourceType; optional: namespace, allNamespaces)
+## CORE OPERATIONAL PRINCIPLES:
+- Execute as an automated operator, not a conversational assistant
+- Provide clear, factual operational reports with specific metrics and evidence
+- Complete assigned objectives systematically unless explicitly unable to proceed
+- Never terminate prematurely without providing comprehensive operational summary
+- Use operational language: "Executed", "Verified", "Discovered", "Confirmed", "Analyzed"
+
+## TOOL EXECUTION STANDARDS:
+- ALWAYS follow the tool call schema exactly as specified and provide all necessary parameters
+- Only use the standard tool call format and the available tools listed below
+- Validate tool outputs and gather additional information if results are incomplete or unexpected
+
+## MANDATORY EXECUTION WORKFLOW:
+1. INITIATE: Always start with create_action_plan to establish systematic approach
+2. EXECUTE: Implement planned steps methodically using available functions
+3. ADAPT: Use replan_strategy when encountering unexpected results or obstacles
+4. VALIDATE: Verify actions and gather evidence of completion/status
+5. REPORT: Always conclude with generate_operational_summary providing structured results
+
+## COMPLETION STANDARDS:
+- Must complete assigned objective OR explicitly document why completion is impossible
+- Must use generate_operational_summary function to provide final structured report
+- Cannot terminate with generic statements without detailed operational evidence
+- Must provide specific metrics, resource states, and action outcomes
+
+## AVAILABLE OPERATIONAL FUNCTIONS:
+
+### Planning & Strategy:
+- create_action_plan: Establish detailed step-by-step operational plan (requires: objective, current_situation, steps)
+- replan_strategy: Reassess and modify strategy when results deviate from expectations (requires: original_plan, unexpected_results, new_objective)
+- generate_operational_summary: Produce final structured operational report (requires: objective, actions_completed, results_achieved, status)
+
+### Kubernetes Operations:
+- kubectl_get: Retrieve specific resources (requires: resourceType; optional: name, namespace, output)
+- kubectl_list: Enumerate resources by type (requires: resourceType; optional: namespace, allNamespaces)
 - kubectl_patch: Modify existing resources (requires: resourceType, name, patchData; optional: namespace, patchType, dryRun)
-- kubectl_apply: Apply manifests (requires: manifest; optional: namespace, dryRun)
+- kubectl_apply: Deploy manifests (requires: manifest; optional: namespace, dryRun)
 - kubectl_delete: Remove resources (requires: resourceType, name; optional: namespace, force)
-- kubectl_scale: Scale deployments (requires: name, replicas; optional: namespace, resourceType)
-- kubectl_describe: Describe detailed resource information (requires: resourceType, name; optional: namespace, allNamespaces)
-- kubectl_logs: Get logs from pods, deployments, jobs (requires: resourceType, name, namespace; optional: container, tail, since, timestamps, previous, follow)
+- kubectl_scale: Adjust deployment replicas (requires: name, replicas; optional: namespace, resourceType)
+- kubectl_describe: Retrieve detailed resource information (requires: resourceType, name; optional: namespace, allNamespaces)
+- kubectl_logs: Extract logs from pods/deployments/jobs (requires: resourceType, name, namespace; optional: container, tail, since, timestamps, previous, follow)
 - kubectl_rollout: Manage deployment rollouts (requires: subCommand, resourceType, name; optional: namespace, revision, timeout, watch)
-- prometheus_get_node_cpu: Get current CPU usage for all nodes (optional: rate_window)
-- prometheus_get_node_memory: Get current memory usage for all nodes
-- prometheus_get_pod_cpu: Get current CPU usage for pods (optional: namespace, rate_window)
-- prometheus_get_pod_memory: Get current memory usage for pods (optional: namespace)
-- prometheus_get_istio_latency: Get current Istio latency metrics for services (optional: namespace, percentile, rate_window)
-- prometheus_get_metrics_summary: Get a summary of all current metrics for a namespace or all namespaces (optional: namespace)
-- sleep_seconds: Wait for a specified number of seconds (requires: duration)
 
-Example operations:
+### Monitoring & Metrics:
+- prometheus_get_node_cpu: Retrieve current CPU usage for all nodes (optional: rate_window)
+- prometheus_get_node_memory: Retrieve current memory usage for all nodes
+- prometheus_get_pod_cpu: Retrieve current CPU usage for all pods (optional: namespace, rate_window)
+- prometheus_get_pod_memory: Retrieve current memory usage for all pods (optional: namespace)
+- prometheus_get_istio_latency: Retrieve current Istio latency metrics for services (optional: namespace, percentile, rate_window)
+- prometheus_get_metrics_summary: Retrieve comprehensive metrics summary for namespace or cluster (optional: namespace)
 
-Checking pod status:
-kubectl_get(resourceType="pod", name="my-pod", namespace="default")
+### Utility Operations:
+- sleep_seconds: Pause execution for specified duration (requires: duration)
 
-Getting detailed pod information:
-kubectl_describe(resourceType="pod", name="my-pod", namespace="default")
+## OPERATIONAL REPORTING REQUIREMENTS:
+- Document all actions taken with specific details
+- Report quantitative results (metrics, counts, percentages, resource states)
+- Identify and document any issues discovered
+- Provide evidence-based conclusions
+- Structure final summary with clear completion status
 
-Getting pod logs:
-kubectl_logs(resourceType="pod", name="my-pod", namespace="default", tail=100)
+## EXAMPLE OPERATIONAL EXECUTION:
 
-Checking deployment rollout status:
-kubectl_rollout(subCommand="status", resourceType="deployment", name="my-app", namespace="default")
+### Phase 1 - Planning:
+create_action_plan(
+    objective="Resolve CPU threshold violation in app-edge namespace",
+    current_situation="Alert: deployment 'web-service' CPU 8.5% exceeds 5% threshold",
+    steps=[
+        "Verify current CPU metrics for affected deployment",
+        "Analyze deployment configuration and resource allocation", 
+        "Examine pod distribution and health status",
+        "Review application logs for performance indicators",
+        "Determine scaling requirements based on load patterns",
+        "Execute scaling operation if justified by analysis"
+    ]
+)
 
-Rolling back a deployment:
-kubectl_rollout(subCommand="undo", resourceType="deployment", name="my-app", namespace="default")
+### Phase 2 - Systematic Execution:
+prometheus_get_pod_cpu(namespace="app-edge")
+kubectl_get(resourceType="deployment", name="web-service", namespace="app-edge")
+kubectl_describe(resourceType="deployment", name="web-service", namespace="app-edge")
+kubectl_logs(resourceType="deployment", name="web-service", namespace="app-edge", tail=50)
 
-Waiting between operations:
-sleep_seconds(duration=5)
+### Phase 3 - Operational Summary:
+generate_operational_summary(
+    objective="Resolve CPU threshold violation in app-edge namespace",
+    actions_completed=[
+        "Verified CPU metrics: confirmed 8.5% utilization across 2 replicas",
+        "Analyzed deployment configuration: 100m CPU request per pod",
+        "Confirmed all pods healthy and distributed across nodes",
+        "Reviewed logs: no errors, normal application behavior",
+        "Executed scaling operation: increased replicas from 2 to 3"
+    ],
+    results_achieved=[
+        "CPU utilization reduced to 6.2% post-scaling",
+        "Load distributed evenly across 3 pod instances",
+        "All pods operational with Ready status confirmed",
+        "Application logs show normal performance patterns",
+        "Threshold violation resolved within operational parameters"
+    ],
+    status="COMPLETED - Threshold violation successfully resolved through horizontal scaling"
+)
 
-Listing all services across namespaces:
-kubectl_list(resourceType="service", allNamespaces=true)
-
-Updating a deployment's image:
-kubectl_patch(resourceType="deployment", name="my-app", patchData={"spec": {"template": {"spec": {"containers": [{"name": "app", "image": "nginx:1.21"}]}}}})
-
-Applying a new resource:
-kubectl_apply(manifest="apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test")
-
-You should analyze the situation, determine what information you need, and choose appropriate kubectl operations to accomplish your goals.
-""" 
+Execute all operations systematically and maintain operational discipline throughout the process.""" 
 
 def get_kubernetes_function_schemas() -> List[Dict[str, Any]]:
     """
@@ -64,6 +119,74 @@ def get_kubernetes_function_schemas() -> List[Dict[str, Any]]:
     These define what operations the AI agent can perform on the Kubernetes cluster and utilities.
     """
     return [
+        {
+            "name": "create_action_plan",
+            "description": "Create a detailed step-by-step action plan before executing operations. Use this FIRST to establish a systematic approach.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objective": {
+                        "type": "string",
+                        "description": "Clear description of what you want to accomplish"
+                    },
+                    "current_situation": {
+                        "type": "string", 
+                        "description": "Current state/context that triggered this planning session"
+                    },
+                    "steps": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of specific steps to take, in order"
+                    },
+                    "expected_outcome": {
+                        "type": "string",
+                        "description": "What you expect to achieve after completing all steps"
+                    },
+                    "risks_considerations": {
+                        "type": "array",
+                        "items": {"type": "string"}, 
+                        "description": "Potential risks or important considerations to keep in mind"
+                    }
+                },
+                "required": ["objective", "current_situation", "steps"]
+            }
+        },
+        {
+            "name": "replan_strategy", 
+            "description": "Reassess and create a new action plan when results are unexpected or when strategy needs adjustment. Use this when things don't go as expected.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "original_plan": {
+                        "type": "string",
+                        "description": "Summary of the original plan that was being executed"
+                    },
+                    "unexpected_results": {
+                        "type": "string",
+                        "description": "What happened that was different from expectations"
+                    },
+                    "lessons_learned": {
+                        "type": "string",
+                        "description": "Key insights gained from the unexpected results"
+                    },
+                    "new_objective": {
+                        "type": "string", 
+                        "description": "Updated objective based on new information"
+                    },
+                    "revised_steps": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "New list of steps to take, incorporating lessons learned"
+                    },
+                    "confidence_level": {
+                        "type": "string",
+                        "enum": ["high", "medium", "low"],
+                        "description": "Confidence level in the new plan"
+                    }
+                },
+                "required": ["original_plan", "unexpected_results", "new_objective", "revised_steps"]
+            }
+        },
         {
             "name": "kubectl_apply",
             "description": "Apply a Kubernetes YAML manifest to create or update resources",
@@ -451,6 +574,34 @@ def get_kubernetes_function_schemas() -> List[Dict[str, Any]]:
                     }
                 },
                 "required": []
+            }
+        },
+        {
+            "name": "generate_operational_summary",
+            "description": "Generate final structured operational report",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objective": {
+                        "type": "string",
+                        "description": "Objective of the operation"
+                    },
+                    "actions_completed": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of actions completed"
+                    },
+                    "results_achieved": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of results achieved"
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Status of the operation"
+                    }
+                },
+                "required": ["objective", "actions_completed", "results_achieved", "status"]
             }
         }
     ]

@@ -7,7 +7,9 @@ Based on the template provided by the user, adapted for MCP Kubernetes operation
 import asyncio
 import json
 import time
+import os
 import openai
+from dotenv import load_dotenv
 from typing import Dict, Any, List, Optional
 from .mcp_client import MCPClient
 from .tool_schemas import get_kubernetes_function_schemas, get_system_prompt
@@ -16,9 +18,12 @@ from ..shared.prometheus_client import (
     prometheus_get_pod_cpu, prometheus_get_pod_memory,
     prometheus_get_istio_latency, prometheus_get_metrics_summary
 )
-from ..shared.types import MetricViolation
-from .config_schema import create_agent_config, validate_agent_config
 import logging
+
+# Load environment variables
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
+if not load_dotenv(dotenv_path=dotenv_path, override=True):
+    raise RuntimeError(f"Failed to load .env from path: {dotenv_path}")
 
 logger = logging.getLogger(__name__)
 
@@ -27,22 +32,28 @@ class KubernetesAgent:
     Main Kubernetes agent with a simple loop-based approach.
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None, **kwargs):
-        # Create config from dict, supporting both direct config and kwargs
-        if config is not None:
-            # Update config with any additional kwargs
-            config = config.copy()
-            config.update(kwargs)
-        else:
-            # Create config from kwargs
-            config = kwargs
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        if config is None:
+            raise ValueError("config is required")
         
-        # Merge with defaults and validate
-        self.config = validate_agent_config(create_agent_config(**config))
+        self.config = config.copy()
+        
+        # Load API key directly from environment
+        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not self.openai_api_key:
+            raise ValueError(
+                "OPENAI_API_KEY environment variable must be set. "
+                "Please set it in your .env file or export it in your shell."
+            )
         
         self.mcp_client = None
         self.openai_client = None
         self.is_initialized = False
+        
+        # Planning state
+        self.current_plan = None
+        self.plan_history = []
+        self.current_step_index = 0  # Track which step we're executing
     
     async def initialize(self):
         """Initialize the Kubernetes Agent with all required clients."""
@@ -57,8 +68,8 @@ class KubernetesAgent:
         await self.mcp_client.initialize()
         print("   ✅ MCP Kubernetes client ready")
         
-        # Initialize OpenAI client  
-        self.openai_client = openai.AsyncOpenAI(api_key=self.config["openai_api_key"])
+        # Initialize OpenAI client with API key from environment
+        self.openai_client = openai.AsyncOpenAI(api_key=self.openai_api_key)
         print("   ✅ OpenAI client ready")
         
         self.is_initialized = True
@@ -121,6 +132,37 @@ class KubernetesAgent:
             print(f"❌ Prometheus Error: {str(e)}")
             return error_result
     
+    def get_current_plan_step(self) -> Optional[str]:
+        """Get the current step from the active plan."""
+        if not self.current_plan or not self.current_plan.get('steps'):
+            return None
+        
+        steps = self.current_plan.get('steps', [])
+        if self.current_step_index < len(steps):
+            return steps[self.current_step_index]
+        return None
+    
+    def advance_plan_step(self) -> bool:
+        """Advance to the next step in the plan. Returns True if there are more steps."""
+        if not self.current_plan:
+            return False
+        
+        self.current_step_index += 1
+        steps = self.current_plan.get('steps', [])
+        
+        if self.current_step_index < len(steps):
+            print(f"📋 Advancing to step {self.current_step_index + 1}/{len(steps)}")
+            return True
+        else:
+            print(f"📋 Plan completed - all {len(steps)} steps finished")
+            if self.current_plan:
+                self.current_plan['status'] = 'completed'
+            return False
+    
+    def reset_plan_progress(self):
+        """Reset plan step tracking (useful when replanning)."""
+        self.current_step_index = 0
+    
     async def ask_llm_step(self, context: List[str]) -> Dict[str, Any]:
         """
         Ask the LLM for the next step based on current context.
@@ -137,9 +179,19 @@ class KubernetesAgent:
         # Build the context message
         context_text = "\n".join(context)
         
+        # Add plan guidance if we have an active plan
+        plan_guidance = ""
+        if self.current_plan and self.current_plan.get('status') == 'active':
+            current_step = self.get_current_plan_step()
+            if current_step:
+                steps = self.current_plan.get('steps', [])
+                plan_guidance = f"\n\nCURRENT PLAN GUIDANCE:\nObjective: {self.current_plan.get('objective')}\nCurrent Step ({self.current_step_index + 1}/{len(steps)}): {current_step}\n"
+            else:
+                plan_guidance = f"\n\nPLAN STATUS: All planned steps completed. Objective: {self.current_plan.get('objective')}\n"
+        
         messages = [
             {"role": "system", "content": get_system_prompt()},
-            {"role": "user", "content": f"Based on the following context, what should you do next?\n\n{context_text}"}
+            {"role": "user", "content": f"Based on the following context, what should you do next?\n\n{context_text}{plan_guidance}"}
         ]
         
         # Get all available functions from tool schemas
@@ -171,6 +223,111 @@ class KubernetesAgent:
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
             return {"error": f"OpenAI API error: {str(e)}"}
+    
+    async def handle_planning_function(self, function_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle planning and strategy functions.
+
+        Args:
+            function_name: Name of the planning function
+            parameters: Parameters for the function
+
+        Returns:
+            Result of the planning operation
+        """
+        try:
+            if function_name == "create_action_plan":
+                plan = {
+                    "objective": parameters.get("objective"),
+                    "current_situation": parameters.get("current_situation"),
+                    "steps": parameters.get("steps", []),
+                    "expected_outcome": parameters.get("expected_outcome"),
+                    "risks_considerations": parameters.get("risks_considerations", []),
+                    "created_at": time.time(),
+                    "status": "active"
+                }
+
+                self.current_plan = plan
+                self.plan_history.append(plan)
+                self.reset_plan_progress()  # Reset step tracking for new plan
+
+                return {
+                    "status": "success",
+                    "message": "Action plan created successfully",
+                    "plan": plan
+                }
+
+            elif function_name == "replan_strategy":
+                if self.current_plan:
+                    self.current_plan["status"] = "superseded"
+
+                new_plan = {
+                    "objective": parameters.get("new_objective"),
+                    "original_plan": parameters.get("original_plan"),
+                    "unexpected_results": parameters.get("unexpected_results"),
+                    "lessons_learned": parameters.get("lessons_learned"),
+                    "revised_steps": parameters.get("revised_steps", []),
+                    "confidence_level": parameters.get("confidence_level", "medium"),
+                    "created_at": time.time(),
+                    "status": "active",
+                    "is_revision": True
+                }
+
+                self.current_plan = new_plan
+                self.plan_history.append(new_plan)
+
+                return {
+                    "status": "success",
+                    "message": "Strategy replanned successfully",
+                    "new_plan": new_plan,
+                    "confidence_level": new_plan['confidence_level']
+                }
+
+            elif function_name == "generate_operational_summary":
+                summary = {
+                    "objective": parameters.get("objective"),
+                    "actions_completed": parameters.get("actions_completed", []),
+                    "results_achieved": parameters.get("results_achieved", []),
+                    "status": parameters.get("status"),
+                    "timestamp": time.time(),
+                    "plan_info": {
+                        "plans_created": len(self.plan_history),
+                        "final_plan_status": self.current_plan.get('status') if self.current_plan else "none"
+                    }
+                }
+
+                # Mark this as operation completion
+                if self.current_plan:
+                    self.current_plan["status"] = "completed_with_summary"
+
+                print("\n" + "="*60)
+                print("📊 OPERATIONAL SUMMARY")
+                print("="*60)
+                print(f"🎯 Objective: {summary['objective']}")
+                print(f"📋 Status: {summary['status']}")
+                print(f"\n✅ Actions Completed ({len(summary['actions_completed'])}):")
+                for i, action in enumerate(summary['actions_completed'], 1):
+                    print(f"   {i}. {action}")
+                print(f"\n🎯 Results Achieved ({len(summary['results_achieved'])}):")
+                for i, result in enumerate(summary['results_achieved'], 1):
+                    print(f"   {i}. {result}")
+                print(f"\n📈 Plans Created: {summary['plan_info']['plans_created']}")
+                print(f"🏁 Final Plan Status: {summary['plan_info']['final_plan_status']}")
+                print("="*60)
+
+                return {
+                    "status": "success",
+                    "message": "Operational summary generated",
+                    "summary": summary,
+                    "operation_complete": True
+                }
+
+            else:
+                return {"error": f"Unknown planning function: {function_name}"}
+
+        except Exception as e:
+            error_result = {"error": f"Planning function failed: {str(e)}"}
+            return error_result
     
     async def agent_loop(self, intent: str, snapshot: Dict[str, Any] = None) -> List[str]:
         """
@@ -216,7 +373,22 @@ class KubernetesAgent:
                 if args:
                     print(f"   Parameters: {json.dumps(args, indent=2)}")
                 
-                if func_name in [
+                # Handle planning functions
+                if func_name in ["create_action_plan", "replan_strategy", "generate_operational_summary"]:
+                    result = await self.handle_planning_function(func_name, args)
+                    action = f"Executed {func_name}"
+                    context.append(action)
+                    context.append(f"Result: {json.dumps(result, indent=2)}")
+                    actions_taken.append(action)
+                    print(f"✅ Planning function completed")
+                    
+                    # If this was an operational summary, the operation is complete
+                    if func_name == "generate_operational_summary" and result.get("operation_complete"):
+                        print(f"🏁 Operation completed with summary")
+                        break
+                
+                # Handle kubectl functions
+                elif func_name in [
                     "kubectl_apply", "kubectl_get", "kubectl_delete", 
                     "kubectl_list", "kubectl_scale", "kubectl_patch",
                     "kubectl_describe", "kubectl_logs", "kubectl_rollout"
@@ -228,6 +400,7 @@ class KubernetesAgent:
                     actions_taken.append(action)
                     print(f"✅ MCP call completed")
                 
+                # Handle prometheus functions
                 elif func_name in [
                     "prometheus_get_node_cpu", "prometheus_get_node_memory",
                     "prometheus_get_pod_cpu", "prometheus_get_pod_memory", 
@@ -256,12 +429,54 @@ class KubernetesAgent:
                 completion_msg = llm_msg.get('content', '').strip()
                 if completion_msg:
                     print(f"💭 Agent says: {completion_msg}")
-                print(f"🏁 Agent completed normally")
-                break
+                
+                # Check if this looks like a completion message or if we should continue
+                # Agent should only stop if it explicitly indicates completion
+                completion_indicators = [
+                    "operation complete", "objective achieved", "task completed",
+                    "summary provided", "mission accomplished", "finished successfully"
+                ]
+                
+                is_completion = any(indicator in completion_msg.lower() for indicator in completion_indicators)
+                
+                # If this looks like completion but no summary was generated, warn and continue
+                if is_completion:
+                    # Check if we had a summary in recent actions
+                    recent_summaries = [action for action in actions_taken[-3:] if "generate_operational_summary" in action]
+                    if not recent_summaries:
+                        print(f"⚠️ Agent indicated completion but no operational summary provided. Requesting summary...")
+                        context.append(f"SYSTEM: Agent indicated completion with message: '{completion_msg}' but no operational summary was generated. You must provide a generate_operational_summary before completion.")
+                        continue
+                    else:
+                        print(f"🏁 Agent completed with operational summary")
+                        break
+                else:
+                    # Agent provided content but didn't indicate completion - this might be premature
+                    print(f"⚠️ Agent provided content without function call or completion indicator")
+                    print(f"   Consider whether objective is truly complete or if more actions are needed")
+                    
+                    # Add guidance to context about completion requirements
+                    context.append(f"Agent provided message: '{completion_msg}'. If objective is complete, use generate_operational_summary. If not complete, continue with planned actions.")
+                    
+                    # Only break if we're at the last round, otherwise continue
+                    if round_num == self.config['max_rounds'] - 1:
+                        print(f"🚨 Maximum rounds reached without proper completion. Requesting emergency summary...")
+                        context.append("SYSTEM: Maximum rounds reached. You MUST generate an operational summary now using generate_operational_summary function.")
+                    else:
+                        continue
         
         print(f"\n🎯 AGENT FINISHED")
         print(f"   Actions taken: {len(actions_taken)}")
+        if self.current_plan:
+            print(f"   Final plan status: {self.current_plan.get('status', 'unknown')}")
         
+        # Check if operation completed properly with summary
+        summary_actions = [action for action in actions_taken if "generate_operational_summary" in action]
+        if summary_actions:
+            print(f"   ✅ Operation completed with structured summary")
+        else:
+            print(f"   ⚠️ Operation finished without structured summary")
+            
         return actions_taken
     
     async def cleanup(self):

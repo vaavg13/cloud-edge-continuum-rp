@@ -12,7 +12,6 @@ import time
 from ..shared.types import MetricViolation
 from ..drift_monitor.monitor_manager import DriftMonitor
 from ..agent.agent import KubernetesAgent
-from ..agent.config_schema import create_agent_config
 from ..agent.violation_handler import ViolationHandler
 
 logger = logging.getLogger(__name__)
@@ -34,11 +33,10 @@ class MonitoringOrchestrator:
     
     def __init__(self, 
                  monitor: DriftMonitor, 
-                 agent: KubernetesAgent,
                  config: Optional[OrchestratorConfig] = None,
-                 intent_template: str = None):
+                 intent_template: str = None,
+                 agent_config: Optional[Dict[str, Any]] = None):
         self.monitor = monitor
-        self.agent = agent
         self.config = config or OrchestratorConfig()
         self.intent_template = intent_template or (
             "Handle {metric_type} issue in namespace {namespace} (deployment: {deployment_name}): "
@@ -48,7 +46,7 @@ class MonitoringOrchestrator:
         # Create violation handler
         self.violation_handler = ViolationHandler(
             intent_template=self.intent_template,
-            agent_config=getattr(agent, 'config', {})
+            agent_config=agent_config or {}
         )
         
         self._agent_semaphore = asyncio.Semaphore(self.config.max_concurrent_agents)
@@ -220,35 +218,3 @@ class MonitoringOrchestrator:
             print(f"   Description: {violation.description}")
         print(f"🤖 Starting agent execution...")
         print("=" * 50)
-
-def create_monitoring_orchestrator(monitor_config, agent_config: Optional[Dict[str, Any]] = None, 
-                                 orchestrator_config: Optional[OrchestratorConfig] = None,
-                                 intent_template: str = None) -> MonitoringOrchestrator:
-    """
-    Convenience function to create a complete monitoring orchestrator.
-    
-    Args:
-        monitor_config: DriftMonitorConfig for the monitor
-        agent_config: Agent configuration dict (optional)
-        orchestrator_config: OrchestratorConfig for orchestration behavior (optional)
-        intent_template: Template for agent intent messages (optional)
-        
-    Returns:
-        MonitoringOrchestrator instance ready to use
-    """
-    from ..drift_monitor.monitor_manager import DriftMonitor
-    from ..agent.agent import KubernetesAgent
-    
-    # Create pure monitoring instance (no violation callback)
-    monitor = DriftMonitor(monitor_config, violation_callback=None)
-    
-    # Create dummy agent instance for backward compatibility
-    agent = KubernetesAgent(config=agent_config or {})
-    
-    # Create orchestrator (ViolationHandler will create its own agent internally)
-    return MonitoringOrchestrator(
-        monitor=monitor,
-        agent=agent, 
-        config=orchestrator_config,
-        intent_template=intent_template
-    ) 
