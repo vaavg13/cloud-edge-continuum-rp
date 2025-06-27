@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+"""
+Simple Chaos Benchmark Generator
+Creates static benchmark experiments with randomized intensities
+"""
+
+import os
+import yaml
+import random
+import subprocess
+import tempfile
+from typing import Dict, Any, List
+
+class ChaosBenchmarkGenerator:
+    """Generate static benchmark chaos experiments with randomized intensities"""
+    
+    def __init__(self, namespace: str = "default", app_list: List[str] = None, seed: int = 42):
+        self.namespace = namespace
+        self.app_list = app_list
+        self.seed = seed
+        random.seed(seed)
+        
+        self.fault_types = ["cpu_stress", "memory_stress", "pod_failure", "network_delay", 
+                           "network_loss", "network_partition", "network_duplicate", 
+                           "network_corrupt", "network_bandwidth"]
+        
+        self.intensities = ["low", "medium", "high", "extreme"]
+        
+        # Intensity parameters
+        self.intensity_params = {
+            "cpu_stress": {
+                "low": {"workers": 1, "load": 30},
+                "medium": {"workers": 2, "load": 60},
+                "high": {"workers": 4, "load": 90},
+                "extreme": {"workers": 8, "load": 100}
+            },
+            "memory_stress": {
+                "low": {"workers": 1, "size": "128MB"},
+                "medium": {"workers": 1, "size": "512MB"},
+                "high": {"workers": 2, "size": "1GB"},
+                "extreme": {"workers": 4, "size": "2GB"}
+            },
+            "network_delay": {
+                "low": {"latency": "50ms", "jitter": "10ms"},
+                "medium": {"latency": "200ms", "jitter": "50ms"},
+                "high": {"latency": "500ms", "jitter": "100ms"},
+                "extreme": {"latency": "1000ms", "jitter": "200ms"}
+            },
+            "network_loss": {
+                "low": {"loss": "5"}, "medium": {"loss": "25"},
+                "high": {"loss": "50"}, "extreme": {"loss": "80"}
+            },
+            "network_duplicate": {
+                "low": {"duplicate": "10"}, "medium": {"duplicate": "50"},
+                "high": {"duplicate": "80"}, "extreme": {"duplicate": "100"}
+            },
+            "network_corrupt": {
+                "low": {"corrupt": "10"}, "medium": {"corrupt": "30"},
+                "high": {"corrupt": "60"}, "extreme": {"corrupt": "90"}
+            },
+            "network_bandwidth": {
+                "low": {"rate": "10mbps", "limit": 102400, "buffer": 50000},
+                "medium": {"rate": "1mbps", "limit": 20480, "buffer": 10000},
+                "high": {"rate": "100kbps", "limit": 2048, "buffer": 1000},
+                "extreme": {"rate": "10kbps", "limit": 512, "buffer": 100}
+            }
+        }
+        
+        self.benchmark_experiments = []
+    
+    def create_experiment_template(self, fault_type: str, app: str, intensity: str) -> Dict[str, Any]:
+        """Create a chaos experiment template"""
+        name = f"{fault_type}-{app}-{intensity}".replace("_", "-")
+        
+        base_template = {
+            "apiVersion": "chaos-mesh.org/v1alpha1",
+            "metadata": {
+                "name": name,
+                "namespace": self.namespace
+            },
+            "spec": {
+                "mode": "one",
+                "selector": {"labelSelectors": {"app": app}},
+                "duration": "60s"
+            }
+        }
+        
+        if fault_type in ["cpu_stress", "memory_stress"]:
+            base_template["kind"] = "StressChaos"
+            stressor_type = fault_type.split("_")[0]
+            base_template["spec"]["stressors"] = {
+                stressor_type: self.intensity_params[fault_type][intensity]
+            }
+        
+        elif fault_type == "pod_failure":
+            base_template["kind"] = "PodChaos"
+            base_template["spec"]["action"] = "pod-kill"
+            base_template["spec"]["duration"] = "30s"
+        
+        elif fault_type.startswith("network"):
+            base_template["kind"] = "NetworkChaos"
+            action = fault_type.replace("network_", "")
+            base_template["spec"]["action"] = action
+            
+            if action == "partition":
+                base_template["spec"]["direction"] = "both"
+                base_template["spec"]["target"] = {
+                    "mode": "all",
+                    "selector": {"labelSelectors": {"app": "any-service"}}
+                }
+            elif action in self.intensity_params:
+                params = self.intensity_params[fault_type][intensity]
+                base_template["spec"][action] = params
+                if action == "delay":
+                    base_template["spec"][action]["correlation"] = "100"
+                elif action in ["loss", "duplicate", "corrupt"]:
+                    base_template["spec"][action]["correlation"] = "100"
+        
+        return base_template
+    
+    def generate_static_benchmark(self, max_per_type: int = 5) -> List[Dict[str, Any]]:
+        """Generate static benchmark with randomized app-intensity combinations"""
+        experiments = []
+        
+        for fault_type in self.fault_types:
+            count = 0
+            for app in self.app_list:
+                if count >= max_per_type:
+                    break
+                    
+                # Random intensity for each app
+                intensity = random.choice(self.intensities)
+                
+                experiment_config = {
+                    "name": f"{fault_type}-{app}-{intensity}".replace("_", "-"),
+                    "fault_type": fault_type,
+                    "app": app,
+                    "intensity": intensity,
+                    "template": self.create_experiment_template(fault_type, app, intensity)
+                }
+                
+                experiments.append(experiment_config)
+                count += 1
+        
+        self.benchmark_experiments = experiments
+        return experiments
+    
+    def deploy_experiment(self, experiment_config: Dict[str, Any]) -> bool:
+        """Deploy a single chaos experiment"""
+        try:
+            template = experiment_config["template"]
+            
+            # Create temporary file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_file:
+                yaml.dump(template, temp_file, default_flow_style=False, sort_keys=False)
+                temp_file_path = temp_file.name
+            
+            # Apply to cluster
+            cmd = f"kubectl apply -f {temp_file_path}"
+            result = subprocess.run(cmd.split(), capture_output=True, text=True)
+            
+            # Clean up temp file
+            os.unlink(temp_file_path)
+            
+            if result.returncode == 0:
+                print(f"✅ Deployed: {experiment_config['name']}")
+                return True
+            else:
+                print(f"❌ Failed to deploy {experiment_config['name']}: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error deploying {experiment_config['name']}: {e}")
+            return False
+    
+    def undeploy_experiment(self, experiment_config: Dict[str, Any]) -> bool:
+        """Undeploy/clean up a chaos experiment"""
+        try:
+            name = experiment_config["name"]
+            fault_type = experiment_config["fault_type"]
+            
+            # Determine chaos type
+            if fault_type in ["cpu_stress", "memory_stress"]:
+                chaos_type = "stresschaos"
+            elif fault_type == "pod_failure":
+                chaos_type = "podchaos"
+            else:
+                chaos_type = "networkchaos"
+            
+            # Delete experiment
+            cmd = f"kubectl delete {chaos_type} {name} -n {self.namespace} --ignore-not-found=true"
+            result = subprocess.run(cmd.split(), capture_output=True, text=True)
+            
+            print(f"🧹 Cleaned up: {name}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error cleaning up {experiment_config['name']}: {e}")
+            return False
+    
+
+if __name__ == "__main__":
+    # Simple demo
+    app_list = ["app1", "app2", "app3", "service-a", "service-b"] 
+    
+    generator = ChaosBenchmarkGenerator(
+        namespace="default", 
+        app_list=app_list, 
+        seed=42
+    )
+    
+    # Generate static benchmark
+    experiments = generator.generate_static_benchmark(max_per_type=5)
+    
+    print(f"🎯 Generated {len(experiments)} chaos experiments:")
+    for exp in experiments[:10]:  # Show first 10
+        print(f"  - {exp['name']}: {exp['fault_type']} on {exp['app']} ({exp['intensity']})")
+    
+    print(f"\n💡 Usage:")
+    print(f"  generator.deploy_experiment(experiments[0])   # Deploy first experiment")
+    print(f"  generator.undeploy_experiment(experiments[0]) # Clean up experiment")
