@@ -5,9 +5,6 @@ Update these settings based on your environment.
 
 import os
 
-# Get API key from environment or use placeholder
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your-api-key-here")
-
 # Test configuration
 TEST_CONFIG = {
     # Test namespace in Kubernetes
@@ -16,12 +13,11 @@ TEST_CONFIG = {
     # Prometheus configuration
     "prometheus_url": "http://localhost:9090",
     
-    # Agent configuration
+    # Agent configuration - API key will be auto-loaded from environment
     "agent_config": {
-        "max_rounds": 3,
+        "max_rounds": 50,
         "agent_timeout": 60,
-        "openai_model": "gpt-4.1",
-        "openai_api_key": OPENAI_API_KEY
+        "openai_model": "gpt-4.1"
     },
     
     # Drift monitor configuration

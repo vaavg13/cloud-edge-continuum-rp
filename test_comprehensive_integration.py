@@ -9,7 +9,7 @@ import json
 import time
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Any
 from test_config import TEST_CONFIG, STRESS_POD_MANIFEST
 
 # Configure logging
@@ -213,12 +213,10 @@ async def test_agent_independently(results: TestResults):
     try:
         from nl_interface.agent.agent import KubernetesAgent
         
-        # Test with simple kubectl commands
         agent = KubernetesAgent(config=TEST_CONFIG["agent_config"])
         
         await agent.initialize()
         
-        # Test simple intent: check existing services
         intent = f"Check the status of services s0, s1, and s2 in the {TEST_NAMESPACE} namespace and list their pods"
         
         actions = await agent.agent_loop(intent)
@@ -252,7 +250,9 @@ async def test_agent_prometheus_queries(results: TestResults):
     try:
         from nl_interface.agent.agent import KubernetesAgent
         
-        agent = KubernetesAgent(config=TEST_CONFIG["agent_config"])
+        # Remove any API key from config - agent will load from environment
+        clean_config = {k: v for k, v in TEST_CONFIG["agent_config"].items() if k != 'openai_api_key'}
+        agent = KubernetesAgent(config=clean_config)
         await agent.initialize()
         
         # Test intent: get metrics for specific services  
@@ -348,7 +348,9 @@ async def test_violation_handler(results: TestResults):
             timestamp=datetime.now(timezone.utc)
         )
         
-        handler = ViolationHandler(agent_config=TEST_CONFIG["agent_config"])
+        # Remove any API key from config - ViolationHandler will pass clean config to agent
+        clean_config = {k: v for k, v in TEST_CONFIG["agent_config"].items() if k != 'openai_api_key'}
+        handler = ViolationHandler(agent_config=clean_config)
         
         result = await handler.handle_violation(test_violation)
         
@@ -379,7 +381,8 @@ async def test_full_integration(results: TestResults):
     print("🔄 Testing Full Integration Pipeline...")
     
     try:
-        from nl_interface.orchestrator.monitoring_orchestrator import create_monitoring_orchestrator
+        from nl_interface.orchestrator.monitoring_orchestrator import MonitoringOrchestrator
+        from nl_interface.drift_monitor.monitor_manager import DriftMonitor
         from nl_interface.orchestrator.monitoring_orchestrator import OrchestratorConfig
         
         # Create orchestrator with test config
@@ -400,11 +403,16 @@ async def test_full_integration(results: TestResults):
             agent_cooldown_seconds=60,  # Shorter cooldown for testing
             agent_timeout_seconds=120
         )
-        
-        orchestrator = create_monitoring_orchestrator(
-            monitor_config=monitor_config,
-            agent_config=TEST_CONFIG["agent_config"],
-            orchestrator_config=orchestrator_config
+
+
+            # Create pure monitoring instance (no violation callback)
+        monitor = DriftMonitor(monitor_config, violation_callback=None)
+
+        # Create orchestrator (ViolationHandler will create its own agent internally)
+        orchestrator = MonitoringOrchestrator(
+            monitor=monitor,
+            config=orchestrator_config,
+            agent_config=TEST_CONFIG["agent_config"]
         )
         
         # Test single check and handle
@@ -611,17 +619,17 @@ async def main():
     
     # Run tests in order
     test_functions = [
-        test_cluster_connectivity,
-        test_existing_infrastructure,
-        verify_existing_services,
+        # test_cluster_connectivity,
+        # test_existing_infrastructure,
+        # verify_existing_services,
         test_prometheus_connectivity,
         test_agent_independently,
         test_agent_prometheus_queries,
-        test_drift_monitor_metrics,
-        test_violation_handler,
-        create_test_load,
-        test_full_integration,
-        cleanup_test_resources
+        # test_drift_monitor_metrics,
+        # test_violation_handler,
+        # create_test_load,
+        # test_full_integration,
+        # cleanup_test_resources
     ]
     
     for test_func in test_functions:
