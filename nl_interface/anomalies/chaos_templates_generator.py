@@ -29,10 +29,10 @@ class ChaosBenchmarkGenerator:
         # Intensity parameters
         self.intensity_params = {
             "cpu_stress": {
-                "low": {"workers": 1, "load": 30},
-                "medium": {"workers": 2, "load": 60},
-                "high": {"workers": 4, "load": 90},
-                "extreme": {"workers": 8, "load": 100}
+                "low": {"workers": 1, "load": 50},
+                "medium": {"workers": 2, "load": 80},
+                "high": {"workers": 4, "load": 95},
+                "extreme": {"workers": 16, "load": 100}  # Much more aggressive: 16 workers at 100% load
             },
             "memory_stress": {
                 "low": {"workers": 1, "size": "128MB"},
@@ -68,9 +68,16 @@ class ChaosBenchmarkGenerator:
         
         self.benchmark_experiments = []
     
-    def create_experiment_template(self, fault_type: str, app: str, intensity: str) -> Dict[str, Any]:
+    def create_experiment_template(self, fault_type: str, app: str, intensity: str, chaos_config: Dict[str, Any] = None) -> Dict[str, Any]:
         """Create a chaos experiment template"""
         name = f"{fault_type}-{app}-{intensity}".replace("_", "-")
+        
+        # Get targeting configuration
+        target_mode = "one"  # Default
+        target_value = ""
+        if chaos_config:
+            target_mode = chaos_config.get("target_mode", "one")
+            target_value = chaos_config.get("target_value", "")
         
         base_template = {
             "apiVersion": "chaos-mesh.org/v1alpha1",
@@ -79,11 +86,15 @@ class ChaosBenchmarkGenerator:
                 "namespace": self.namespace
             },
             "spec": {
-                "mode": "one",
+                "mode": target_mode,
                 "selector": {"labelSelectors": {"app": app}},
                 "duration": "60s"
             }
         }
+        
+        # Add target value for specific modes
+        if target_mode in ["fixed", "fixed-percent", "random-max-percent"] and target_value:
+            base_template["spec"]["value"] = target_value
         
         if fault_type in ["cpu_stress", "memory_stress"]:
             base_template["kind"] = "StressChaos"
@@ -199,23 +210,21 @@ class ChaosBenchmarkGenerator:
             return False
     
 
-if __name__ == "__main__":
-    # Simple demo
-    app_list = ["app1", "app2", "app3", "service-a", "service-b"] 
+# if __name__ == "__main__":
+#     # Simple demo
+#     app_list = ["app1", "app2", "app3", "service-a", "service-b"] 
     
-    generator = ChaosBenchmarkGenerator(
-        namespace="default", 
-        app_list=app_list, 
-        seed=42
-    )
+#     generator = ChaosBenchmarkGenerator(
+#         namespace="default", 
+#         app_list=app_list, 
+#         seed=42
+#     )
     
-    # Generate static benchmark
-    experiments = generator.generate_static_benchmark(max_per_type=5)
+#     # Generate static benchmark
+#     experiments = generator.generate_static_benchmark(max_per_type=5)
     
-    print(f"🎯 Generated {len(experiments)} chaos experiments:")
-    for exp in experiments[:10]:  # Show first 10
-        print(f"  - {exp['name']}: {exp['fault_type']} on {exp['app']} ({exp['intensity']})")
+#     for exp in experiments[:10]:  # Show first 10
+#         print(f"  - {exp['name']}: {exp['fault_type']} on {exp['app']} ({exp['intensity']})")
     
-    print(f"\n💡 Usage:")
-    print(f"  generator.deploy_experiment(experiments[0])   # Deploy first experiment")
-    print(f"  generator.undeploy_experiment(experiments[0]) # Clean up experiment")
+#     # generator.deploy_experiment(experiments[0])  
+#     # generator.undeploy_experiment(experiments[0]) 

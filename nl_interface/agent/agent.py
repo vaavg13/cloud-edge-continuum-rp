@@ -38,6 +38,10 @@ class KubernetesAgent:
         
         self.config = config.copy()
         
+        # Add reasoning summary config option (defaults to True for better explainability)
+        if "show_reasoning" not in self.config:
+            self.config["show_reasoning"] = True
+        
         # Load API key directly from environment
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         if not self.openai_api_key:
@@ -54,6 +58,10 @@ class KubernetesAgent:
         self.current_plan = None
         self.plan_history = []
         self.current_step_index = 0  # Track which step we're executing
+        
+        # Simple redundancy prevention - track recent function calls
+        self.recent_calls = {}  # {function_signature: timestamp}
+        self.call_freshness_seconds = 30  # Skip identical calls within 30 seconds
     
     async def initialize(self):
         """Initialize the Kubernetes Agent with all required clients."""
@@ -162,6 +170,28 @@ class KubernetesAgent:
     def reset_plan_progress(self):
         """Reset plan step tracking (useful when replanning)."""
         self.current_step_index = 0
+        # Clear recent calls when starting new plan to allow fresh data collection
+        self.recent_calls.clear()
+    
+    def is_recent_call(self, function_name: str, parameters: Dict[str, Any]) -> Optional[str]:
+        """Check if this exact function call was made recently. Returns skip reason if should skip."""
+        # Create signature for this function call
+        param_str = json.dumps(parameters, sort_keys=True) if parameters else ""
+        call_signature = f"{function_name}_{param_str}"
+        
+        # Check if we made this exact call recently
+        if call_signature in self.recent_calls:
+            age = time.time() - self.recent_calls[call_signature]
+            if age < self.call_freshness_seconds:
+                return f"identical call made {age:.1f}s ago"
+        
+        return None  # Don't skip
+    
+    def record_function_call(self, function_name: str, parameters: Dict[str, Any]):
+        """Record that we made this function call."""
+        param_str = json.dumps(parameters, sort_keys=True) if parameters else ""
+        call_signature = f"{function_name}_{param_str}"
+        self.recent_calls[call_signature] = time.time()
     
     async def ask_llm_step(self, context: List[str]) -> Dict[str, Any]:
         """
@@ -369,6 +399,14 @@ class KubernetesAgent:
                 func_name = llm_msg["function_call"]["name"]
                 args = llm_msg["function_call"]["arguments"]
                 
+                # Check for redundant data collection calls (skip planning functions)
+                if func_name not in ["create_action_plan", "replan_strategy", "generate_operational_summary"]:
+                    skip_reason = self.is_recent_call(func_name, args)
+                    if skip_reason:
+                        print(f"⏭️  Skipping {func_name}: {skip_reason}")
+                        context.append(f"Skipped redundant {func_name} call: {skip_reason}")
+                        continue
+                
                 print(f"⚡ Executing: {func_name}")
                 if args:
                     print(f"   Parameters: {json.dumps(args, indent=2)}")
@@ -381,7 +419,7 @@ class KubernetesAgent:
                     context.append(f"Result: {json.dumps(result, indent=2)}")
                     actions_taken.append(action)
                     print(f"✅ Planning function completed")
-                    
+                                        
                     # If this was an operational summary, the operation is complete
                     if func_name == "generate_operational_summary" and result.get("operation_complete"):
                         print(f"🏁 Operation completed with summary")
@@ -399,6 +437,12 @@ class KubernetesAgent:
                     context.append(f"Result: {json.dumps(result, indent=2)}")
                     actions_taken.append(action)
                     print(f"✅ MCP call completed")
+                    
+                    # Record this function call to prevent redundancy
+                    self.record_function_call(func_name, args)
+                    
+                    # Show reasoning summary
+                    await self.display_reasoning_if_enabled(context, func_name, result)
                 
                 # Handle prometheus functions
                 elif func_name in [
@@ -412,6 +456,12 @@ class KubernetesAgent:
                     context.append(f"Result: {json.dumps(result, indent=2)}")
                     actions_taken.append(action)
                     print(f"✅ Prometheus call completed")
+                    
+                    # Record this function call to prevent redundancy
+                    self.record_function_call(func_name, args)
+                    
+                    # Show reasoning summary
+                    await self.display_reasoning_if_enabled(context, func_name, result)
                 
                 elif func_name == "sleep_seconds":
                     duration = args["duration"]
@@ -421,6 +471,13 @@ class KubernetesAgent:
                     context.append(action)
                     actions_taken.append(action)
                     print(f"✅ Sleep completed")
+                    
+                    # Record this function call to prevent redundancy
+                    self.record_function_call(func_name, args)
+                    
+                    # Show reasoning summary
+                    result = {"duration": duration, "status": "completed"}
+                    await self.display_reasoning_if_enabled(context, func_name, result)
                 
                 else:
                     print(f"⚠️ Unknown function: {func_name}")
@@ -495,3 +552,66 @@ class KubernetesAgent:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
         await self.cleanup()
+
+    async def get_reasoning_summary(self, context: List[str], last_function: str, last_result: Dict[str, Any]) -> str:
+        """
+        Get a brief reasoning summary from the LLM after a tool call.
+        
+        Args:
+            context: Current context from the agent loop
+            last_function: Name of the function that was just executed
+            last_result: Result from the last function call
+            
+        Returns:
+            Reasoning summary string
+        """
+        if not self.is_initialized:
+            return "Agent not initialized"
+        
+        try:
+            # Build reasoning prompt
+            context_text = "\n".join(context[-5:])  # Last 5 context items to avoid too much text
+            
+            reasoning_prompt = f"""Based on your recent action and its result, provide a brief reasoning summary.
+
+Recent context:
+{context_text}
+
+Last action: {last_function}
+Result: {json.dumps(last_result, indent=2)[:500]}...
+
+Provide a 2-3 sentence summary covering:
+1. What you learned from this action
+2. Why this action was important for your objective  
+3. What you plan to do next
+
+Keep it concise and focused on operational reasoning."""
+
+            messages = [
+                {"role": "user", "content": reasoning_prompt}
+            ]
+            
+            response = await self.openai_client.chat.completions.create(
+                model=self.config["openai_model"],
+                messages=messages,
+                max_tokens=150,  # Keep it concise
+                temperature=0.1  # Keep it factual
+            )
+            
+            reasoning = response.choices[0].message.content.strip()
+            return reasoning
+            
+        except Exception as e:
+            logger.error(f"Error getting reasoning summary: {e}")
+            return f"Unable to generate reasoning summary: {str(e)}"
+
+    async def display_reasoning_if_enabled(self, context: List[str], function_name: str, result: Dict[str, Any]):
+        """Display reasoning summary if enabled in config."""
+        if not self.config.get("show_reasoning", True):
+            return
+            
+        try:
+            reasoning = await self.get_reasoning_summary(context, function_name, result)
+            print(f"\n💡 REASONING: {reasoning}")
+        except Exception as e:
+            logger.error(f"Error displaying reasoning: {e}")

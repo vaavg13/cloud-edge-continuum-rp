@@ -5,5 +5,6 @@ DEFAULT_AGENT_CONFIG = {
     "mcp_server_command": ["npx", "mcp-server-kubernetes"],
     "max_rounds": 10,
     "agent_timeout": 120,
-    "agent_verbose": True
+    "agent_verbose": True,
+    "show_reasoning": True  # Enable reasoning summaries for better explainability
 }

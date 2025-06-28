@@ -57,7 +57,7 @@ class PrometheusMetricsTool:
         return {"status": "success", "data": results}
     
     def get_current_node_memory(self) -> Dict[str, Any]:
-        """Get current memory usage for all nodes."""
+        """Get current memory usage for all nodes (using working set like kubectl top)."""
         query = 'sum by (instance) (container_memory_working_set_bytes{image!="", container!="POD"})'
         data = self.exporter._query_prometheus(query)
         
@@ -69,10 +69,12 @@ class PrometheusMetricsTool:
             node_id = item['metric'].get('instance', 'unknown_instance').split(':')[0]
             memory_bytes = int(float(item['value'][1]))
             memory_mb = round(memory_bytes / (1024 * 1024), 2)
+            memory_gb = round(memory_bytes / (1024 * 1024 * 1024), 2)
             results.append({
                 "node": node_id,
                 "memory_working_set_bytes": memory_bytes,
                 "memory_working_set_mb": memory_mb,
+                "memory_working_set_gb": memory_gb,
                 "timestamp": format_timestamp(float(item['value'][0]))
             })
         
@@ -99,17 +101,18 @@ class PrometheusMetricsTool:
             namespace_val = item['metric'].get('namespace', 'unknown_namespace')
             pod_val = item['metric'].get('pod', 'unknown_pod')
             cpu_cores = round(float(item['value'][1]), 3)
+            cpu_millicores = round(cpu_cores * 1000, 0)  # Convert to millicores like kubectl top
             results.append({
                 "namespace": namespace_val,
                 "pod": pod_val,
-                "cpu_cores_used": cpu_cores,
+                "cpu_millicores": f"{int(cpu_millicores)}m",  # Format like kubectl top (e.g., "5m")
                 "timestamp": format_timestamp(float(item['value'][0]))
             })
         
         return {"status": "success", "data": results}
     
     def get_current_pod_memory(self, namespace: Optional[str] = None) -> Dict[str, Any]:
-        """Get current memory usage for pods."""
+        """Get current memory usage for pods (using working set like kubectl top pod)."""
         # Build namespace filter
         if namespace:
             namespace_filter = f'namespace="{namespace}"'
@@ -118,7 +121,8 @@ class PrometheusMetricsTool:
         else:
             full_selector = 'image!="", container!="POD"'
         
-        query = f'sum by (namespace, pod) (container_memory_usage_bytes{{{full_selector}}})'
+        # Use container_memory_working_set_bytes to match kubectl top pod behavior
+        query = f'sum by (namespace, pod) (container_memory_working_set_bytes{{{full_selector}}})'
         data = self.exporter._query_prometheus(query)
         
         if not data or data.get('status') != 'success':
@@ -129,18 +133,17 @@ class PrometheusMetricsTool:
             namespace_val = item['metric'].get('namespace', 'unknown_namespace')
             pod_val = item['metric'].get('pod', 'unknown_pod')
             memory_bytes = int(float(item['value'][1]))
-            memory_mb = round(memory_bytes / (1024 * 1024), 2)
+            memory_mib = round(memory_bytes / (1024 * 1024), 0)  # Mebibytes like kubectl top
             results.append({
                 "namespace": namespace_val,
                 "pod": pod_val,
-                "memory_usage_bytes": memory_bytes,
-                "memory_usage_mb": memory_mb,
+                "memory_working_set_mib": f"{int(memory_mib)}Mi",
                 "timestamp": format_timestamp(float(item['value'][0]))
             })
         
         return {"status": "success", "data": results}
     
-    def get_current_istio_latency(self, namespace: Optional[str] = None, percentile="0.95", rate_window="5m") -> Dict[str, Any]:
+    def get_current_istio_latency(self, namespace: Optional[str] = None, percentile="0.95", rate_window="2m") -> Dict[str, Any]:
         """Get current Istio latency metrics for services."""
         import math
         
@@ -152,7 +155,7 @@ class PrometheusMetricsTool:
         else:
             full_selector = 'reporter="destination"'
         
-        # Try histogram quantile first (with longer 5m window)
+        # Use histogram quantile for P95 latency (with shorter window for chaos detection)
         query = f'''histogram_quantile({percentile},
             sum(rate(istio_request_duration_milliseconds_bucket{{{full_selector}}}[{rate_window}]))
             by (le, destination_workload, destination_workload_namespace)
@@ -195,7 +198,7 @@ class PrometheusMetricsTool:
                             })
         
         if not results:
-            return {"error": "Failed to query Istio latency metrics", "data": []}
+            return {"error": "Failed to query Istio P95 latency metrics", "data": []}
         
         return {"status": "success", "data": results}
     
@@ -251,7 +254,7 @@ def prometheus_get_pod_memory(namespace: Optional[str] = None) -> Dict[str, Any]
     tool = get_prometheus_tool()
     return tool.get_current_pod_memory(namespace)
 
-def prometheus_get_istio_latency(namespace: Optional[str] = None, percentile: str = "0.95", rate_window: str = "1m") -> Dict[str, Any]:
+def prometheus_get_istio_latency(namespace: Optional[str] = None, percentile: str = "0.95", rate_window: str = "2m") -> Dict[str, Any]:
     """Get current Istio latency metrics for services in specified namespace or all namespaces."""
     tool = get_prometheus_tool()
     return tool.get_current_istio_latency(namespace, percentile, rate_window)
