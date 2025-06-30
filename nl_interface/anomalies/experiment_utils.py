@@ -7,22 +7,20 @@ Helper functions for experiment configuration and validation.
 from .experiment_config import EXPERIMENT_CONFIG, ALERT_CONFIG, LOGGING_CONFIG
 
 def calculate_chaos_duration(config=None):
-    """Calculate chaos duration to cover all chaos phases with buffer."""
+    """Set chaos duration to run indefinitely until manually cleaned up.
+    
+    The agent execution time is unpredictable - it could finish in 30 seconds
+    or take several minutes depending on the complexity of the issue and 
+    number of diagnostic steps required. We set a very long duration and
+    clean up the chaos experiment manually after the agent completes.
+    """
     if config is None:
         config = EXPERIMENT_CONFIG
     
-    # Chaos needs to cover:
-    # - chaos_warmup_duration: metrics during active chaos
-    # - agent_timeout: agent execution during chaos  
-    # - recovery_duration: recovery monitoring (chaos may still be active)
-    # - buffer: safety margin
-    
-    chaos_duration_seconds = (
-        config["chaos_warmup_duration"] +
-        config["agent_config"]["agent_timeout"] +
-        config["recovery_duration"] +
-        30  # 30s buffer
-    )
+    # Set chaos to run for 1 hour (practically infinite for our experiments)
+    # This ensures chaos is ALWAYS active during agent execution
+    # and we manually clean it up when the experiment ends
+    chaos_duration_seconds = 3600  # 1 hour
     
     return f"{chaos_duration_seconds}s"
 

@@ -11,14 +11,18 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-# Import Kubernetes and deployment modules
-from kubernetes import client, config
-from mu_bench.deployers.manager import K8sDeploymentManager
+# CRITICAL: Import TrafficGenerator FIRST (contains Locust) before Kubernetes
+# This ensures proper SSL monkey-patching order to prevent recursion errors
+from .traffic_generator import LocustTrafficGenerator
 
-# Import project modules
+# Import other project modules
 from .chaos_templates_generator import ChaosBenchmarkGenerator
 from nl_interface.agent.agent import KubernetesAgent
-from .traffic_generator import TrafficGenerator
+from nl_interface.shared.prometheus_client import PrometheusMetricsTool
+from .prometheus_utils import (
+    format_pod_cpu, format_pod_memory, format_istio_latency,
+    extract_prometheus_latency, extract_prometheus_cpu
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,112 +38,128 @@ class ChaosAndMitigationTest:
         self.agent = None
         self.traffic_generator = None
         self.chaos_experiment = None
-        self.start_time = None
+        
+        # Initialize Prometheus metrics tool
+        self.prometheus_tool = PrometheusMetricsTool()
         
         # Store metrics for alert context
         self.baseline_metrics = None
+        self.baseline_prometheus_metrics = None
         self.current_metrics = None
         
     async def setup(self):
-        """Initialize all test components."""
-        print("Setting up test components...")
+        """Setup chaos and mitigation components."""
+        # Initialize traffic generator
+        self.traffic_generator = LocustTrafficGenerator(self.config["traffic_config"])
         
-        # Initialize chaos generator
+        # Initialize chaos generator  
         self.chaos_generator = ChaosBenchmarkGenerator(
             namespace=self.config["namespace"],
             app_list=[self.config["target_app"]],
             seed=self.config["chaos_config"]["seed"]
         )
         
-        # Initialize traffic generator
-        self.traffic_generator = TrafficGenerator(self.config["traffic_config"])
+        # Prometheus tool already initialized in __init__
+        # self.prometheus_tool = PrometheusMetricsTool()
         
-        # Initialize agent
-        self.agent = KubernetesAgent(config=self.config["agent_config"])
-        await self.agent.initialize()
-        
-        print("Test components initialized")
-        
-    async def wait_for_pods_ready(self, namespace: str, timeout: int = None) -> bool:
-        """Wait for all pods in namespace to be ready."""
-        if timeout is None:
-            timeout = self.config["test_settings"]["pod_ready_timeout"]
-            
-        config.load_kube_config()
-        k8s_core_api = client.CoreV1Api()
-        
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                pods = k8s_core_api.list_namespaced_pod(namespace=namespace)
-                if not pods.items:
-                    await asyncio.sleep(5)
-                    continue
-                    
-                ready_count = 0
-                for pod in pods.items:
-                    if pod.status.conditions:
-                        for condition in pod.status.conditions:
-                            if condition.type == 'Ready' and condition.status == 'True':
-                                ready_count += 1
-                                break
-                
-                if ready_count == len(pods.items):
-                    print(f"All {ready_count} pods ready in {namespace}")
-                    return True
-                    
-                print(f"Waiting... {ready_count}/{len(pods.items)} pods ready")
-                await asyncio.sleep(5)
-                
-            except Exception as e:
-                print(f"Error: {e}")
-                await asyncio.sleep(5)
-        
-        print(f"Timeout waiting for pods in {namespace}")
-        return False
+        # Initialize agent (will be created fresh each time)
+        self.agent = None
+        self.baseline_metrics = None
+        self.baseline_prometheus_metrics = None
 
-    async def deploy_fresh_app(self) -> bool:
-        """Deploy fresh app instances for testing."""
-        if not self.config["test_settings"]["deploy_fresh_app"]:
-            print("Skipping fresh app deployment (disabled in config)")
-            return True
+    async def _smart_warmup_with_monitoring(self):
+        """Smart warmup that monitors latency until it stabilizes."""
+        max_warmup_time = self.config["pod_warmup_duration"]  # Safety limit
+        check_interval = 30  # Check every 30 seconds
+        stability_window = 3  # Need 3 stable measurements
+        stability_threshold = 0.3  # Latency variation < 30% to consider stable
+        min_success_rate = 70  # Minimum success rate to consider healthy
+        
+        latency_history = []
+        elapsed_time = 0
+        stable_count = 0
+        
+        print(f"🔄 Monitoring warmup (max {max_warmup_time}s, checking every {check_interval}s)")
+        print(f"📊 Looking for latency stabilization: <{stability_threshold*100}% variation for {stability_window} measurements")
+        
+        # Reset metrics at start of warmup
+        self.traffic_generator.reset_phase_metrics()
+        
+        while elapsed_time < max_warmup_time:
+            await asyncio.sleep(check_interval)
+            elapsed_time += check_interval
             
-        print(f"\nDeploying fresh application...")
+            # Get current metrics for this check interval
+            metrics = self.traffic_generator.get_phase_metrics(check_interval)
+            
+            # Reset metrics after reading (so next measurement is clean)
+            self.traffic_generator.reset_phase_metrics()
+            
+            if not metrics or metrics.get('total_requests', 0) == 0:
+                print(f"⏳ {elapsed_time}s: No requests yet, continuing warmup...")
+                continue
+                
+            current_latency = metrics.get('p95_latency_seconds', 0)
+            success_rate = metrics.get('success_rate_percent', 0)
+            
+            print(f"📈 {elapsed_time}s: P95={current_latency:.3f}s, Success={success_rate:.1f}%, Req={metrics.get('total_requests', 0)}")
+            
+            # Check if service is healthy enough to measure
+            if success_rate < min_success_rate:
+                print(f"⚠️  Success rate too low ({success_rate:.1f}% < {min_success_rate}%), continuing warmup...")
+                latency_history.clear()  # Reset history due to unhealthy state
+                stable_count = 0
+                continue
+            
+            # Add to latency history
+            latency_history.append(current_latency)
+            
+            # Only start checking stability after we have enough history
+            if len(latency_history) < stability_window:
+                continue
+                
+            # Keep only recent history
+            if len(latency_history) > stability_window:
+                latency_history.pop(0)
+            
+            # Check if latency is stable (low variation)
+            if len(latency_history) == stability_window:
+                min_latency = min(latency_history)
+                max_latency = max(latency_history)
+                
+                # Avoid division by zero
+                if min_latency > 0:
+                    variation = (max_latency - min_latency) / min_latency
+                    
+                    if variation <= stability_threshold:
+                        stable_count += 1
+                        print(f"✅ Stable measurement {stable_count}: variation {variation:.2%} (threshold: {stability_threshold:.0%})")
+                        
+                        # Consider stable if we have enough consecutive stable measurements
+                        if stable_count >= 2:  # At least 2 consecutive stable intervals
+                            print(f"🎯 Latency stabilized at ~{current_latency:.3f}s after {elapsed_time}s")
+                            print(f"✅ Warmup complete - services ready for baseline measurement")
+                            return
+                    else:
+                        stable_count = 0
+                        print(f"📊 Variation {variation:.2%} > {stability_threshold:.0%}, waiting for stability...")
         
-        app_name = "app-edge"
-        app_dir = f"{self.config['app_directory']}/{app_name}"
-        
-        print(f"Undeploying existing {app_name}...")
-        try:
-            mgr = K8sDeploymentManager.from_deployment_dir(app_dir)
-            mgr.undeploy()
-            print(f"Undeployment completed")
-        except Exception as e:
-            print(f"Undeploy warning (may not exist): {e}")
-        
-        # Wait a bit for cleanup
-        await asyncio.sleep(10)
-        
-        print(f"Deploying fresh {app_name}...")
-        mgr = K8sDeploymentManager.from_deployment_dir(app_dir)
-        mgr.deploy()
-        
-        print(f"Waiting for pods to be ready...")
-        success = await self.wait_for_pods_ready(mgr.namespace)
-        
-        if success:
-            print(f"Fresh application deployed successfully")
+        # If we exit the loop, we hit max time
+        if latency_history:
+            avg_latency = sum(latency_history) / len(latency_history)
+            print(f"⏰ Max warmup time reached ({max_warmup_time}s)")
+            print(f"📊 Final average latency: {avg_latency:.3f}s")
         else:
-            print(f"Failed to deploy fresh application")
-            return False
-            
-        return True
+            print(f"⚠️  Warmup completed without stable measurements")
+        
+        print(f"✅ Proceeding to baseline measurement")
 
     async def inject_chaos(self) -> bool:
         """Inject chaos into the target application."""
         print(f"🎯 Target: {self.config['target_app']}")
-        print(f"⚔️  Type: {self.config['chaos_config']['fault_type']} ({self.config['chaos_config']['intensity']}, {self.config['chaos_duration']})")
+        print(f"⚔️  Type: {self.config['chaos_config']['fault_type']} ({self.config['chaos_config']['intensity']})")
         print(f"🎲 Mode: {self.config['chaos_config'].get('target_mode', 'one')} replica(s)")
+        print(f"⏰ Duration: Indefinite (cleaned up after agent completes)")
         
         # Create chaos experiment
         self.chaos_experiment = {
@@ -155,57 +175,61 @@ class ChaosAndMitigationTest:
             )
         }
         
-        # Override duration
+        # Set indefinite duration - chaos runs until manually cleaned up
         self.chaos_experiment["template"]["spec"]["duration"] = self.config["chaos_duration"]
         
         # Deploy the chaos experiment
         success = self.chaos_generator.deploy_experiment(self.chaos_experiment)
         
         if success:
-            print("✅ Chaos experiment deployed")
-            self.start_time = time.time()
+            print("✅ Chaos experiment deployed (will run until manually stopped)")
             return True
         else:
             print("❌ Failed to deploy chaos experiment")
             return False
     
-    async def deploy_mitigation_agent(self) -> list:
+    async def deploy_mitigation_agent(self, chaos_metrics: Dict[str, Any], chaos_prometheus_metrics: Dict[str, Any]) -> list:
         """Deploy the agent to mitigate the issues."""
         print(f"🤖 Deploying mitigation agent...")
         print(f"⚙️  Max rounds: {self.config['agent_config']['max_rounds']}, timeout: {self.config['agent_config']['agent_timeout']}s")
-        print(f"⚠️  Note: Agent executing while chaos is still ACTIVE for real-time mitigation")
         
-        # Capture current metrics for alert context
-        self.current_metrics = self.traffic_generator.get_phase_metrics()
+        # Initialize agent fresh for this execution
+        self.agent = KubernetesAgent(config=self.config["agent_config"])
+        await self.agent.initialize()
         
-        # Create realistic alert intent with baseline comparison
+        # Store metrics for context
+        self.current_metrics = chaos_metrics
+        self._current_prometheus_metrics = chaos_prometheus_metrics
+        
+        # Extract Prometheus metrics for alert context
+        baseline_p95 = extract_prometheus_latency(self.baseline_prometheus_metrics, self.config["namespace"]) if self.baseline_prometheus_metrics else 'unknown'
+        current_p95 = extract_prometheus_latency(chaos_prometheus_metrics, self.config["namespace"]) if chaos_prometheus_metrics else 'unknown'
+        
+        # Create alert intent
         intent = self.alert_config["alert_template"].format(
-            target_app=self.config["target_app"],
             namespace=self.config["namespace"],
-            baseline_latency_p95=self.baseline_metrics.get('p95_latency_seconds', 'unknown') if self.baseline_metrics else 'unknown',
-            baseline_success_rate=self.baseline_metrics.get('success_rate_percent', 'unknown') if self.baseline_metrics else 'unknown',
-            current_latency_p95=self.current_metrics.get('p95_latency_seconds', 'unknown'),
-            current_success_rate=self.current_metrics.get('success_rate_percent', 'unknown')
+            timestamp=datetime.now().isoformat(),
+            baseline_latency_p95=f"{baseline_p95}ms",
+            baseline_success_rate=f"{self.baseline_metrics.get('success_rate_percent', 'unknown')}",
+            current_latency_p95=f"{current_p95}ms", 
+            current_success_rate=f"{self.current_metrics.get('success_rate_percent', 'unknown')}"
         )
         
-        # Create minimal monitoring context
+        # Create monitoring context
         snapshot = {
             field: self._get_context_value(field)
             for field in self.alert_config["context_fields"]
         }
         
-        print(f"🚨 Alert: Performance degradation detected on {self.config['target_app']}")
+        print(f"🚨 Alert: Critical performance degradation in namespace {self.config['namespace']}")
         if self.baseline_metrics and self.current_metrics:
-            print(f"   📊 Baseline: {self.baseline_metrics['success_rate_percent']:.1f}% success, {self.baseline_metrics['p95_latency_seconds']:.3f}s P95")
-            print(f"   ⚠️  Current: {self.current_metrics['success_rate_percent']:.1f}% success, {self.current_metrics['p95_latency_seconds']:.3f}s P95")
+            print(f"   📈 Success rate: {self.baseline_metrics['success_rate_percent']:.1f}% → {self.current_metrics['success_rate_percent']:.1f}%")
+            print(f"   📈 Latency P95: {self.baseline_metrics['p95_latency_seconds']:.3f}s → {self.current_metrics['p95_latency_seconds']:.3f}s")
         
         try:
             # Run the agent
             actions_taken = await self.agent.agent_loop(intent, snapshot)
-            
-            print(f"\n✅ Agent execution completed while chaos was active")
-            print(f"📝 Agent took {len(actions_taken)} action(s)")
-            
+            print(f"\n✅ Agent execution completed - {len(actions_taken)} action(s) taken")
             return actions_taken
             
         except Exception as e:
@@ -216,8 +240,7 @@ class ChaosAndMitigationTest:
         """Get context value for alert fields."""
         context_map = {
             "namespace": self.config["namespace"],
-            "alert_type": "performance_degradation",
-            "affected_service": self.config["target_app"],
+            "alert_type": "performance_degradation", 
             "timestamp": datetime.now().isoformat(),
             "baseline_latency_p95": str(self.baseline_metrics.get('p95_latency_seconds', 'unknown')) if self.baseline_metrics else 'unknown',
             "baseline_success_rate": str(self.baseline_metrics.get('success_rate_percent', 'unknown')) if self.baseline_metrics else 'unknown',
@@ -226,16 +249,25 @@ class ChaosAndMitigationTest:
         }
         return context_map.get(field, "unknown")
     
+    def _cleanup_chaos_sync(self) -> bool:
+        """Synchronous chaos cleanup function to run in thread executor."""
+        if self.chaos_experiment:
+            return self.chaos_generator.undeploy_experiment(self.chaos_experiment)
+        return True
+
     async def cleanup_chaos(self):
-        """Clean up the chaos experiment."""
-        print(f"🧹 Cleaning up chaos experiment...")
+        """Clean up the chaos experiment after agent completion."""
+        print(f"🧹 Manually stopping chaos experiment (after agent completion)...")
         
         if self.chaos_experiment:
-            success = self.chaos_generator.undeploy_experiment(self.chaos_experiment)
+            # Run chaos cleanup in thread executor for consistency
+            loop = asyncio.get_event_loop()
+            success = await loop.run_in_executor(None, self._cleanup_chaos_sync)
+            
             if success:
-                print("✅ Chaos experiment cleaned up")
+                print("✅ Chaos experiment manually stopped - agent had unlimited time to work")
             else:
-                print("⚠️  Chaos experiment cleanup had issues (may have already expired)")
+                print("⚠️  Chaos experiment cleanup had issues")
         else:
             print("ℹ️  No chaos experiment to clean up")
     
@@ -257,7 +289,8 @@ class ChaosAndMitigationTest:
         if self.chaos_experiment:
             try:
                 print("Cleaning up chaos experiment...")
-                success = self.chaos_generator.undeploy_experiment(self.chaos_experiment)
+                loop = asyncio.get_event_loop()
+                success = await loop.run_in_executor(None, self._cleanup_chaos_sync)
                 if success:
                     print("Chaos experiment cleaned up")
                 else:
@@ -276,29 +309,6 @@ class ChaosAndMitigationTest:
         
         print("=" * 40)
         print("Emergency cleanup completed - safe to exit")
-
-    async def cleanup(self):
-        """Clean up all test resources."""
-        if not self.config["test_settings"]["cleanup_after_test"]:
-            print("Skipping cleanup (disabled in config)")
-            return
-            
-        print(f"\nCleaning up test resources...")
-        
-        # Stop traffic first
-        if self.traffic_generator:
-            await self.traffic_generator.stop_traffic()
-            print("Traffic generation stopped")
-        
-        # Clean up chaos experiment
-        await self.cleanup_chaos()
-        
-        # Clean up agent
-        if self.agent:
-            await self.agent.cleanup()
-            print("Agent cleaned up")
-        
-        print("All test resources cleaned up")
 
     async def cleanup_remaining_resources(self):
         """Clean up remaining resources (traffic, agent) after chaos is already cleaned."""
@@ -322,66 +332,48 @@ class ChaosAndMitigationTest:
     
     def print_experiment_summary(self, phase_metrics: Dict, agent_actions: list):
         """Print final experiment summary with phase comparisons."""
-        print(f"\n" + "=" * 60)
+        print(f"\n" + "=" * 50)
         print(f"🎯 EXPERIMENT SUMMARY")
-        print("=" * 60)
+        print("=" * 50)
         
-        # Phase-by-phase results
-        print(f"\n📊 PHASE RESULTS:")
-        print("-" * 60)
-        phase_emojis = {
-            "baseline": "✅",
-            "chaos": "⚠️ ",
-            "recovery": "🩹"
-        }
+        # Phase results
+        phase_emojis = {"baseline": "✅", "chaos": "⚠️", "recovery": "🩹"}
         for phase_name, metrics in phase_metrics.items():
             emoji = phase_emojis.get(phase_name, "📈")
-            print(f"{emoji} {phase_name.upper():>11}: {metrics['total_requests']:>5} req | "
-                  f"{metrics['success_rate_percent']:>6.1f}% success | "
-                  f"P95: {metrics['p95_latency_seconds']:>6.3f}s")
+            print(f"{emoji} {phase_name.upper()}: {metrics['total_requests']} req | "
+                  f"{metrics['success_rate_percent']:.1f}% success | "
+                  f"P95: {metrics['p95_latency_seconds']:.3f}s")
         
         # Impact analysis
         if "baseline" in phase_metrics and "chaos" in phase_metrics:
             baseline_p95 = phase_metrics["baseline"]["p95_latency_seconds"]
             chaos_p95 = phase_metrics["chaos"]["p95_latency_seconds"]
-            
-            print(f"\n💥 IMPACT ANALYSIS:")
-            print("-" * 60)
-            if baseline_p95 > 0:
-                latency_degradation = (chaos_p95 / baseline_p95)
-                print(f"📈 Latency degradation: {latency_degradation:.2f}x worse ({baseline_p95:.3f}s → {chaos_p95:.3f}s)")
-            
             baseline_success = phase_metrics["baseline"]["success_rate_percent"]
             chaos_success = phase_metrics["chaos"]["success_rate_percent"]
-            success_drop = baseline_success - chaos_success
-            print(f"📉 Success rate drop: {success_drop:.1f}% ({baseline_success:.1f}% → {chaos_success:.1f}%)")
             
-            # Recovery analysis
+            print(f"\n💥 IMPACT:")
+            if baseline_p95 > 0:
+                degradation = (chaos_p95 / baseline_p95)
+                print(f"📈 Latency: {degradation:.2f}x worse ({baseline_p95:.3f}s → {chaos_p95:.3f}s)")
+            print(f"📉 Success rate: {baseline_success:.1f}% → {chaos_success:.1f}%")
+            
+            # Recovery
             if "recovery" in phase_metrics:
                 recovery_p95 = phase_metrics["recovery"]["p95_latency_seconds"]
                 recovery_success = phase_metrics["recovery"]["success_rate_percent"]
-                
-                if chaos_p95 > 0:
-                    recovery_improvement = ((chaos_p95 - recovery_p95) / chaos_p95) * 100
-                    print(f"🔄 Recovery improvement: {recovery_improvement:.1f}% (P95: {chaos_p95:.3f}s → {recovery_p95:.3f}s)")
-                
-                success_recovery = recovery_success - chaos_success
-                print(f"🔄 Success rate recovery: {success_recovery:.1f}% ({chaos_success:.1f}% → {recovery_success:.1f}%)")
+                print(f"🔄 Recovery: P95 {recovery_p95:.3f}s, Success {recovery_success:.1f}%")
         
         # Agent actions
         print(f"\n🤖 AGENT ACTIONS ({len(agent_actions)}):")
-        print("-" * 60)
         if agent_actions:
             for i, action in enumerate(agent_actions, 1):
                 print(f"  {i}. {action}")
         else:
             print("  ❌ No actions taken")
         
-        print("=" * 60)
-        print("🎉 EXPERIMENT COMPLETED")
-        print("=" * 60)
+        print("=" * 50)
 
-    async def run_full_experiment(self) -> Dict[str, Any]:
+    async def run_full_experiment(self, deployment_already_done: bool = False, deployment_namespace: str = "") -> Dict[str, Any]:
         """Run the simplified chaos injection and mitigation experiment."""
         results = {
             "success": False,
@@ -397,31 +389,39 @@ class ChaosAndMitigationTest:
             await self.setup()
             results["phases_completed"].append("setup")
             
-            # Deploy fresh application
-            if await self.deploy_fresh_app():
-                results["phases_completed"].append("deployment")
-            else:
-                raise Exception("Failed to deploy fresh application")
+            # Application deployment handled before async context
+            print(f"✅ Using already deployed application in namespace: {deployment_namespace}")
+            results["phases_completed"].append("deployment")
             
-            # === PHASE 1: POD WARMUP (no metrics recorded) ===
+            # === PHASE 1: POD WARMUP ===
             print(f"\n🚀 === PHASE 1: POD WARMUP ===")
             await self.traffic_generator.start_traffic()
-            print(f"Warming up pods for {self.config['pod_warmup_duration']}s...")
-            await asyncio.sleep(self.config["pod_warmup_duration"])
-            # No metrics recorded for warmup
+            print(f"Starting service warmup with latency monitoring...")
+            
+            # Smart warmup with latency stabilization detection
+            await self._smart_warmup_with_monitoring()
+            
             results["phases_completed"].append("pod_warmup")
             
             # === PHASE 2: BASELINE METRICS ===
             print(f"\n📊 === PHASE 2: BASELINE METRICS ===")
+            # Reset metrics at START of baseline measurement phase
+            self.traffic_generator.reset_phase_metrics()
             print(f"Recording baseline metrics for {self.config['baseline_duration']}s...")
             await asyncio.sleep(self.config["baseline_duration"])
-            baseline_metrics = self.traffic_generator.get_phase_metrics()
             
-            # Store baseline metrics for agent alert context
+            # Collect both traffic generator and Prometheus baseline metrics
+            baseline_metrics = self.traffic_generator.get_phase_metrics(self.config["baseline_duration"])
             self.baseline_metrics = baseline_metrics
             
+            # Collect Prometheus baseline metrics for agent context
+            print(f"📈 Collecting Prometheus baseline metrics...")
+            self.baseline_prometheus_metrics = self.prometheus_tool.get_metrics_summary(self.config["namespace"])
+            
             results["phase_metrics"]["baseline"] = baseline_metrics
-            print(f"✅ Baseline: {baseline_metrics['total_requests']} req, {baseline_metrics['success_rate_percent']}% success, P95: {baseline_metrics['p95_latency_seconds']}s")
+            print(f"✅ Baseline: {baseline_metrics['total_requests']} req ({baseline_metrics['expected_requests']} expected)")
+            print(f"    Success: {baseline_metrics['success_rate_percent']}%, P95: {baseline_metrics['p95_latency_seconds']}s, Duration: {baseline_metrics['actual_duration_seconds']}s, RPS: {baseline_metrics.get('current_rps', 0)}")
+            print(f"✅ Prometheus baseline captured for agent reference")
             results["phases_completed"].append("baseline")
             
             # === CHAOS INJECTION ===
@@ -433,26 +433,37 @@ class ChaosAndMitigationTest:
             
             # === PHASE 3: CHAOS WARMUP (record metrics during active chaos) ===
             print(f"\n🔥 === PHASE 3: CHAOS WARMUP (ACTIVE CHAOS) ===")
+            # Reset metrics at START of chaos measurement phase
+            self.traffic_generator.reset_phase_metrics()
             print(f"Recording metrics during chaos for {self.config['chaos_warmup_duration']}s...")
             await asyncio.sleep(self.config["chaos_warmup_duration"])
-            chaos_metrics = self.traffic_generator.get_phase_metrics()
+            chaos_metrics = self.traffic_generator.get_phase_metrics(self.config["chaos_warmup_duration"])
             results["phase_metrics"]["chaos"] = chaos_metrics
-            print(f"⚠️  Chaos: {chaos_metrics['total_requests']} req, {chaos_metrics['success_rate_percent']}% success, P95: {chaos_metrics['p95_latency_seconds']}s")
+            print(f"⚠️  Chaos: {chaos_metrics['total_requests']} req ({chaos_metrics['expected_requests']} expected)")
+            print(f"    Success: {chaos_metrics['success_rate_percent']}%, P95: {chaos_metrics['p95_latency_seconds']}s, Duration: {chaos_metrics['actual_duration_seconds']}s, RPS: {chaos_metrics.get('current_rps', 0)}")
+            
+            # Collect Prometheus chaos metrics for agent context
+            print(f"📈 Collecting Prometheus chaos metrics for agent context...")
+            chaos_prometheus_metrics = self.prometheus_tool.get_metrics_summary(self.config["namespace"])
+            print(f"✅ Prometheus chaos metrics captured for agent reference")
             results["phases_completed"].append("chaos_warmup")
             
             # === AGENT EXECUTION (during active chaos) ===
             print(f"\n🤖 === AGENT EXECUTION (CHAOS STILL ACTIVE) ===")
-            agent_actions = await self.deploy_mitigation_agent()
+            agent_actions = await self.deploy_mitigation_agent(chaos_metrics, chaos_prometheus_metrics)
             results["agent_actions"] = agent_actions
             results["phases_completed"].append("agent_execution")
             
             # === PHASE 4: RECOVERY METRICS ===
             print(f"\n🔄 === PHASE 4: RECOVERY METRICS ===")
+            # Reset metrics at START of recovery measurement phase (after agent execution)
+            self.traffic_generator.reset_phase_metrics()
             print(f"Recording recovery metrics for {self.config['recovery_duration']}s...")
             await asyncio.sleep(self.config["recovery_duration"])
-            recovery_metrics = self.traffic_generator.get_phase_metrics()
+            recovery_metrics = self.traffic_generator.get_phase_metrics(self.config["recovery_duration"])
             results["phase_metrics"]["recovery"] = recovery_metrics
-            print(f"🩹 Recovery: {recovery_metrics['total_requests']} req, {recovery_metrics['success_rate_percent']}% success, P95: {recovery_metrics['p95_latency_seconds']}s")
+            print(f"🩹 Recovery: {recovery_metrics['total_requests']} req ({recovery_metrics['expected_requests']} expected)")
+            print(f"    Success: {recovery_metrics['success_rate_percent']}%, P95: {recovery_metrics['p95_latency_seconds']}s, Duration: {recovery_metrics['actual_duration_seconds']}s, RPS: {recovery_metrics.get('current_rps', 0)}")
             results["phases_completed"].append("recovery")
             
             # === CLEANUP AND FINAL METRICS ===

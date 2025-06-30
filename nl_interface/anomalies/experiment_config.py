@@ -5,8 +5,8 @@ EXPERIMENT_CONFIG = {
     "target_app": "s2-cloud",
     "app_directory": "./APPS",
     
-    # Test timing configuration - simplified phases
-    "pod_warmup_duration": 60,      # Warmup pods (no metrics recorded)
+    # Test timing configuration - simplified phases with longer warmup
+    "pod_warmup_duration": 300,     # Extended warmup with smart monitoring for service stabilization  
     "baseline_duration": 60,        # Record baseline metrics
     "chaos_warmup_duration": 60,    # Chaos impact + warmup before agent (record metrics during chaos)
     "recovery_duration": 60,        # Recovery after agent execution (record metrics)
@@ -17,7 +17,7 @@ EXPERIMENT_CONFIG = {
         "fault_type": "cpu_stress",
         "intensity": "extreme",  # extreme, high, medium, low
         "seed": 42,
-        "target_mode": "all",  # "one", "all", "fixed", "fixed-percent", "random-max-percent"
+        "target_mode": "one",  # "one", "all", "fixed", "fixed-percent", "random-max-percent"
         "target_value": "",    # Used with fixed/fixed-percent/random-max-percent modes
     },
     
@@ -35,8 +35,8 @@ EXPERIMENT_CONFIG = {
             "http://172.23.0.5:31115/s0-edge-site-1",
             "http://172.23.0.5:31115/s0-edge-site-2"
         ],
-        "requests_per_second": 20,  # Moderate load
-        "request_timeout": 5,
+        "requests_per_second": 5,  # 2 req/s per endpoint = 4 req/s total = 240 req per 60s phase (conservative)
+        "request_timeout": 10,
         "collect_metrics": True
     },
     
@@ -50,15 +50,14 @@ EXPERIMENT_CONFIG = {
 
 # Alert configuration - what the agent receives
 ALERT_CONFIG = {
-    "alert_template": "CRITICAL: Performance degradation detected on deployment {target_app} in namespace {namespace}. IMMEDIATE CORRECTIVE ACTION REQUIRED to restore performance to baseline levels. Current performance vs baseline: Latency {current_latency_p95}s (baseline: {baseline_latency_p95}s), Success rate {current_success_rate}% (baseline: {baseline_success_rate}%). You must implement corrective actions and validate improvement.",
+    "alert_template": "🚨 CRITICAL INCIDENT: Performance degradation detected in namespace '{namespace}' at {timestamp}. ALERT TRIGGERS: Service latency degraded from {baseline_latency_p95} to {current_latency_p95} (degradation threshold exceeded), Success rate dropped from {baseline_success_rate}% to {current_success_rate}% (availability threshold exceeded). IMMEDIATE INVESTIGATION AND CORRECTIVE ACTION REQUIRED. You must: 1) Investigate and identify which specific services/deployments are affected and causing this degradation, 2) Determine root cause of the performance issues, 3) Implement appropriate remediation actions, 4) Validate that service performance is restored to acceptable levels. Use Prometheus metrics and Kubernetes tools to diagnose the situation systematically.",
     "context_fields": [
         "namespace",
         "alert_type", 
-        "affected_service",
         "timestamp",
         "baseline_latency_p95",
-        "baseline_success_rate",
-        "current_latency_p95", 
+        "baseline_success_rate", 
+        "current_latency_p95",
         "current_success_rate"
     ]
 }

@@ -12,11 +12,11 @@ import openai
 from dotenv import load_dotenv
 from typing import Dict, Any, List, Optional
 from .mcp_client import MCPClient
-from .tool_schemas import get_kubernetes_function_schemas, get_system_prompt
+from .tool_schemas import get_kubernetes_function_schemas
+from .system_prompt import get_system_prompt
 from ..shared.prometheus_client import (
-    prometheus_get_node_cpu, prometheus_get_node_memory,
-    prometheus_get_pod_cpu, prometheus_get_pod_memory,
-    prometheus_get_istio_latency, prometheus_get_metrics_summary
+    # New simplified time series functions (optimized for agent use)
+    prometheus_get_timeseries, prometheus_get_node_timeseries, prometheus_get_service_topology
 )
 import logging
 
@@ -117,14 +117,11 @@ class KubernetesAgent:
             Result from Prometheus query
         """
         try:
-            # Map function names to actual functions
+            # Map function names to actual functions (simplified)
             function_map = {
-                "prometheus_get_node_cpu": prometheus_get_node_cpu,
-                "prometheus_get_node_memory": prometheus_get_node_memory,
-                "prometheus_get_pod_cpu": prometheus_get_pod_cpu,
-                "prometheus_get_pod_memory": prometheus_get_pod_memory,
-                "prometheus_get_istio_latency": prometheus_get_istio_latency,
-                "prometheus_get_metrics_summary": prometheus_get_metrics_summary
+                "prometheus_get_timeseries": prometheus_get_timeseries,
+                "prometheus_get_node_timeseries": prometheus_get_node_timeseries,
+                "prometheus_get_service_topology": prometheus_get_service_topology
             }
             
             func = function_map.get(function_name)
@@ -444,12 +441,8 @@ class KubernetesAgent:
                     # Show reasoning summary
                     await self.display_reasoning_if_enabled(context, func_name, result)
                 
-                # Handle prometheus functions
-                elif func_name in [
-                    "prometheus_get_node_cpu", "prometheus_get_node_memory",
-                    "prometheus_get_pod_cpu", "prometheus_get_pod_memory", 
-                    "prometheus_get_istio_latency", "prometheus_get_metrics_summary"
-                ]:
+                # Handle prometheus functions (simplified)
+                elif func_name in ["prometheus_get_timeseries", "prometheus_get_node_timeseries"]:
                     result = await self.call_prometheus_function(func_name, args)
                     action = f"Executed {func_name}: {args}"
                     context.append(action)
