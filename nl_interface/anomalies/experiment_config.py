@@ -25,7 +25,7 @@ EXPERIMENT_CONFIG = {
     "agent_config": {
         "max_rounds": 50,
         "agent_timeout": 90,
-        "openai_model": "gpt-4o",
+        "openai_model": "gpt-4.1",
         "show_reasoning": True,  # Enable reasoning summaries for better explainability
         "reasoning_in_context": False
     },

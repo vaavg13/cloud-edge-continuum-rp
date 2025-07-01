@@ -112,7 +112,12 @@ generate_operational_summary(
     objective="Restore latency to baseline",
     actions_completed=["Scaled web-service 1→3 replicas"],
     results_achieved=["Latency improved 55 % (5.2 s→2.3 s)"],
-    status="COMPLETED – performance restored"
+    status="COMPLETED – performance restored",
+    success=True,
+    problem_location={
+        "deployments": ["web-service"],
+        "resource_types": ["deployment"]
+    }
 )
 ```
 

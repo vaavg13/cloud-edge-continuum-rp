@@ -427,9 +427,44 @@ def get_kubernetes_function_schemas() -> List[Dict[str, Any]]:
                     "status": {
                         "type": "string",
                         "description": "Status of the operation"
+                    },
+                    "problem_location": {
+                        "type": "object",
+                        "description": "Details about where the problem occurred",
+                        "properties": {
+                            "deployments": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Names of the deployments affected by the problem"
+                            },
+                            "services": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Names of the services affected by the problem"
+                            },
+                            "nodes": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Names of the nodes where the problem occurred"
+                            },
+                            "pods": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Names of specific pods affected by the problem"
+                            },
+                            "resource_types": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Types of Kubernetes resources affected (deployment, pod, service, node, etc.)"
+                            }
+                        }
+                    },
+                    "success": {
+                        "type": "boolean",
+                        "description": "Whether the problem was successfully resolved (true) or not (false)"
                     }
                 },
-                "required": ["objective", "actions_completed", "results_achieved", "status"]
+                "required": ["objective", "actions_completed", "results_achieved", "status", "success"]
             }
         }
     ]

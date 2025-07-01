@@ -278,6 +278,8 @@ class KubernetesAgent:
                     "actions_completed": parameters.get("actions_completed", []),
                     "results_achieved": parameters.get("results_achieved", []),
                     "status": parameters.get("status"),
+                    "problem_location": parameters.get("problem_location", {}),
+                    "success": parameters.get("success", False),
                     "timestamp": time.time(),
                     "plan_info": {
                         "plans_created": len(self.plan_history),
@@ -294,6 +296,37 @@ class KubernetesAgent:
                 print("="*60)
                 print(f"🎯 Objective: {summary['objective']}")
                 print(f"📋 Status: {summary['status']}")
+                
+                # Display success/failure prominently
+                success_icon = "✅" if summary['success'] else "❌"
+                success_text = "SUCCEEDED" if summary['success'] else "FAILED"
+                print(f"🏆 Resolution: {success_icon} {success_text}")
+                
+                # Display problem location details if provided
+                problem_location = summary.get('problem_location', {})
+                if problem_location:
+                    print(f"\n📍 PROBLEM LOCATION:")
+                    if problem_location.get('deployments'):
+                        deployments = problem_location['deployments']
+                        deployment_str = ', '.join(deployments) if isinstance(deployments, list) else str(deployments)
+                        print(f"   🚀 Deployments: {deployment_str}")
+                    if problem_location.get('services'):
+                        services = problem_location['services']
+                        service_str = ', '.join(services) if isinstance(services, list) else str(services)
+                        print(f"   🔗 Services: {service_str}")
+                    if problem_location.get('nodes'):
+                        nodes = problem_location['nodes']
+                        node_str = ', '.join(nodes) if isinstance(nodes, list) else str(nodes)
+                        print(f"   🖥️  Nodes: {node_str}")
+                    if problem_location.get('pods'):
+                        pods = problem_location['pods']
+                        pod_str = ', '.join(pods) if isinstance(pods, list) else str(pods)
+                        print(f"   🐳 Pods: {pod_str}")
+                    if problem_location.get('resource_types'):
+                        resource_types = problem_location['resource_types']
+                        resource_str = ', '.join(resource_types) if isinstance(resource_types, list) else str(resource_types)
+                        print(f"   📦 Resource Types: {resource_str}")
+                
                 print(f"\n✅ Actions Completed ({len(summary['actions_completed'])}):")
                 for i, action in enumerate(summary['actions_completed'], 1):
                     print(f"   {i}. {action}")

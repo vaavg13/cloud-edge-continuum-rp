@@ -267,8 +267,89 @@ class ChaosAndMitigationTest:
             
         print("Remaining test resources cleaned up")
 
-    def print_experiment_summary(self, phase_metrics: Dict, agent_actions: list):
-        """Print final experiment summary with phase comparisons."""
+    def evaluate_recovery_success(self, phase_metrics: Dict) -> Dict[str, Any]:
+        """Evaluate if the agent successfully recovered the system to near baseline levels."""
+        if "baseline" not in phase_metrics or "recovery" not in phase_metrics:
+            return {
+                "success": False,
+                "reason": "Missing baseline or recovery metrics for comparison",
+                "metrics_comparison": {}
+            }
+        
+        baseline = phase_metrics["baseline"]
+        recovery = phase_metrics["recovery"]
+        
+        # Define success thresholds (configurable)
+        latency_threshold = 1.2  # Recovery latency should be within 20% of baseline
+        success_rate_threshold = 5.0  # Recovery success rate should be within 5% of baseline
+        
+        # Check if baseline is placeholder (from skipped mode)
+        is_placeholder_baseline = (baseline["p95_latency_seconds"] == 0.1 and 
+                                 baseline["total_requests"] == 0)
+        
+        metrics_comparison = {
+            "baseline_latency_p95": baseline["p95_latency_seconds"],
+            "recovery_latency_p95": recovery["p95_latency_seconds"],
+            "baseline_success_rate": baseline["success_rate_percent"],
+            "recovery_success_rate": recovery["success_rate_percent"],
+            "is_placeholder_baseline": is_placeholder_baseline
+        }
+        
+        if is_placeholder_baseline:
+            # In fast mode, use chaos metrics as baseline comparison
+            if "chaos" in phase_metrics:
+                chaos = phase_metrics["chaos"]
+                # Success if recovery is better than chaos (improvement detected)
+                latency_improved = recovery["p95_latency_seconds"] < chaos["p95_latency_seconds"]
+                success_rate_improved = recovery["success_rate_percent"] > chaos["success_rate_percent"]
+                
+                success = latency_improved and success_rate_improved
+                reason = f"Fast mode: Recovery {'improved' if success else 'did not improve'} compared to chaos phase"
+                
+                metrics_comparison.update({
+                    "chaos_latency_p95": chaos["p95_latency_seconds"],
+                    "chaos_success_rate": chaos["success_rate_percent"],
+                    "latency_improved": latency_improved,
+                    "success_rate_improved": success_rate_improved
+                })
+            else:
+                success = False
+                reason = "Fast mode: Missing chaos metrics for comparison"
+        else:
+            # Normal mode: compare recovery with baseline
+            latency_ratio = recovery["p95_latency_seconds"] / baseline["p95_latency_seconds"] if baseline["p95_latency_seconds"] > 0 else float('inf')
+            success_rate_diff = abs(recovery["success_rate_percent"] - baseline["success_rate_percent"])
+            
+            latency_acceptable = latency_ratio <= latency_threshold
+            success_rate_acceptable = success_rate_diff <= success_rate_threshold
+            
+            success = latency_acceptable and success_rate_acceptable
+            
+            if success:
+                reason = f"Recovery within acceptable thresholds: latency {latency_ratio:.2f}x baseline, success rate ±{success_rate_diff:.1f}%"
+            else:
+                issues = []
+                if not latency_acceptable:
+                    issues.append(f"latency {latency_ratio:.2f}x baseline (threshold: {latency_threshold}x)")
+                if not success_rate_acceptable:
+                    issues.append(f"success rate ±{success_rate_diff:.1f}% (threshold: ±{success_rate_threshold}%)")
+                reason = f"Recovery exceeded thresholds: {', '.join(issues)}"
+            
+            metrics_comparison.update({
+                "latency_ratio": latency_ratio,
+                "success_rate_diff": success_rate_diff,
+                "latency_acceptable": latency_acceptable,
+                "success_rate_acceptable": success_rate_acceptable
+            })
+        
+        return {
+            "success": success,
+            "reason": reason,
+            "metrics_comparison": metrics_comparison
+        }
+
+    def print_experiment_summary(self, phase_metrics: Dict, agent_actions: list, recovery_evaluation: Dict[str, Any] = None):
+        """Print final experiment summary with phase comparisons and recovery evaluation."""
         print(f"\n" + "=" * 50)
         print(f"🎯 EXPERIMENT SUMMARY")
         print("=" * 50)
@@ -317,6 +398,23 @@ class ChaosAndMitigationTest:
                 print(f"  {i}. {action}")
         else:
             print("  ❌ No actions taken")
+        
+        # Recovery evaluation
+        if recovery_evaluation:
+            print(f"\n🏆 RECOVERY EVALUATION:")
+            success_icon = "✅" if recovery_evaluation["success"] else "❌"
+            success_text = "SUCCESSFUL" if recovery_evaluation["success"] else "FAILED"
+            print(f"   {success_icon} Status: {success_text}")
+            print(f"   📝 Reason: {recovery_evaluation['reason']}")
+            
+            # Additional metrics details if available
+            metrics = recovery_evaluation.get("metrics_comparison", {})
+            if metrics and not metrics.get("is_placeholder_baseline", False):
+                print(f"   📊 Metrics: Latency ratio {metrics.get('latency_ratio', 'N/A'):.2f}x, "
+                      f"Success rate diff ±{metrics.get('success_rate_diff', 'N/A'):.1f}%")
+            elif metrics and metrics.get("is_placeholder_baseline", False):
+                print(f"   📊 Fast mode comparison: Latency {'improved' if metrics.get('latency_improved') else 'not improved'}, "
+                      f"Success rate {'improved' if metrics.get('success_rate_improved') else 'not improved'}")
         
         print("=" * 50)
 
@@ -448,10 +546,19 @@ class ChaosAndMitigationTest:
             await self.traffic_generator.stop_traffic()
             await self.cleanup_chaos()
             
-            # Final metrics comparison
-            self.print_experiment_summary(results["phase_metrics"], agent_actions)
+            # Evaluate recovery success
+            print(f"\n🔍 === RECOVERY EVALUATION ===")
+            recovery_evaluation = self.evaluate_recovery_success(results["phase_metrics"])
+            results["recovery_evaluation"] = recovery_evaluation
             
-            results["success"] = True
+            # Final metrics comparison with recovery evaluation
+            self.print_experiment_summary(results["phase_metrics"], agent_actions, recovery_evaluation)
+            
+            # Set overall experiment success based on recovery evaluation
+            results["success"] = recovery_evaluation["success"]
+            results["recovery_successful"] = recovery_evaluation["success"]
+            results["recovery_reason"] = recovery_evaluation["reason"]
+            
             return results
             
         except KeyboardInterrupt:
