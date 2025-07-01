@@ -25,8 +25,9 @@ EXPERIMENT_CONFIG = {
     "agent_config": {
         "max_rounds": 50,
         "agent_timeout": 90,
-        "openai_model": "gpt-4.1",
-        "show_reasoning": True  # Enable reasoning summaries for better explainability
+        "openai_model": "gpt-4o",
+        "show_reasoning": True,  # Enable reasoning summaries for better explainability
+        "reasoning_in_context": False
     },
     
     # Traffic generation configuration
@@ -45,6 +46,7 @@ EXPERIMENT_CONFIG = {
         "deploy_fresh_app": True,      # Deploy fresh app instances
         "cleanup_after_test": True,    # Clean up test resources
         "pod_ready_timeout": 300,      # Timeout for pod readiness in seconds
+        "skip_warmup_baseline": False, # Skip warmup and baseline phases for faster testing
     }
 }
 

@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 from typing import Dict, Any, List, Optional
 from .mcp_client import MCPClient
 from .tool_schemas import get_kubernetes_function_schemas
-from .system_prompt import get_system_prompt
+from .system_prompt_v2 import get_system_prompt
+from .reasoning_prompts import get_reasoning_summary_prompt
 from ..shared.prometheus_client import (
     # New simplified time series functions (optimized for agent use)
     prometheus_get_timeseries, prometheus_get_node_timeseries, prometheus_get_service_topology
@@ -41,6 +42,10 @@ class KubernetesAgent:
         # Add reasoning summary config option (defaults to True for better explainability)
         if "show_reasoning" not in self.config:
             self.config["show_reasoning"] = True
+        
+        # New: optionally include reasoning summaries in context fed back to LLM
+        if "reasoning_in_context" not in self.config:
+            self.config["reasoning_in_context"] = False
         
         # Load API key directly from environment
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -146,23 +151,6 @@ class KubernetesAgent:
         if self.current_step_index < len(steps):
             return steps[self.current_step_index]
         return None
-    
-    def advance_plan_step(self) -> bool:
-        """Advance to the next step in the plan. Returns True if there are more steps."""
-        if not self.current_plan:
-            return False
-        
-        self.current_step_index += 1
-        steps = self.current_plan.get('steps', [])
-        
-        if self.current_step_index < len(steps):
-            print(f"📋 Advancing to step {self.current_step_index + 1}/{len(steps)}")
-            return True
-        else:
-            print(f"📋 Plan completed - all {len(steps)} steps finished")
-            if self.current_plan:
-                self.current_plan['status'] = 'completed'
-            return False
     
     def reset_plan_progress(self):
         """Reset plan step tracking (useful when replanning)."""
@@ -284,32 +272,6 @@ class KubernetesAgent:
                     "plan": plan
                 }
 
-            elif function_name == "replan_strategy":
-                if self.current_plan:
-                    self.current_plan["status"] = "superseded"
-
-                new_plan = {
-                    "objective": parameters.get("new_objective"),
-                    "original_plan": parameters.get("original_plan"),
-                    "unexpected_results": parameters.get("unexpected_results"),
-                    "lessons_learned": parameters.get("lessons_learned"),
-                    "revised_steps": parameters.get("revised_steps", []),
-                    "confidence_level": parameters.get("confidence_level", "medium"),
-                    "created_at": time.time(),
-                    "status": "active",
-                    "is_revision": True
-                }
-
-                self.current_plan = new_plan
-                self.plan_history.append(new_plan)
-
-                return {
-                    "status": "success",
-                    "message": "Strategy replanned successfully",
-                    "new_plan": new_plan,
-                    "confidence_level": new_plan['confidence_level']
-                }
-
             elif function_name == "generate_operational_summary":
                 summary = {
                     "objective": parameters.get("objective"),
@@ -397,7 +359,7 @@ class KubernetesAgent:
                 args = llm_msg["function_call"]["arguments"]
                 
                 # Check for redundant data collection calls (skip planning functions)
-                if func_name not in ["create_action_plan", "replan_strategy", "generate_operational_summary"]:
+                if func_name not in ["create_action_plan", "generate_operational_summary"]:
                     skip_reason = self.is_recent_call(func_name, args)
                     if skip_reason:
                         print(f"⏭️  Skipping {func_name}: {skip_reason}")
@@ -409,7 +371,7 @@ class KubernetesAgent:
                     print(f"   Parameters: {json.dumps(args, indent=2)}")
                 
                 # Handle planning functions
-                if func_name in ["create_action_plan", "replan_strategy", "generate_operational_summary"]:
+                if func_name in ["create_action_plan", "generate_operational_summary"]:
                     result = await self.handle_planning_function(func_name, args)
                     action = f"Executed {func_name}"
                     context.append(action)
@@ -442,7 +404,11 @@ class KubernetesAgent:
                     await self.display_reasoning_if_enabled(context, func_name, result)
                 
                 # Handle prometheus functions (simplified)
-                elif func_name in ["prometheus_get_timeseries", "prometheus_get_node_timeseries"]:
+                elif func_name in [
+                    "prometheus_get_timeseries",
+                    "prometheus_get_node_timeseries",
+                    "prometheus_get_service_topology"
+                ]:
                     result = await self.call_prometheus_function(func_name, args)
                     action = f"Executed {func_name}: {args}"
                     context.append(action)
@@ -528,23 +494,6 @@ class KubernetesAgent:
             print(f"   ⚠️ Operation finished without structured summary")
             
         return actions_taken
-    
-    async def cleanup(self):
-        """Clean up resources."""
-        print("🧹 Cleaning up agent...")
-        if self.mcp_client:
-            await self.mcp_client.stop()
-        self.is_initialized = False
-        print("✅ Agent cleanup complete")
-    
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.initialize()
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        await self.cleanup()
 
     async def get_reasoning_summary(self, context: List[str], last_function: str, last_result: Dict[str, Any]) -> str:
         """
@@ -562,23 +511,15 @@ class KubernetesAgent:
             return "Agent not initialized"
         
         try:
-            # Build reasoning prompt
+            # Build reasoning prompt using the prompts module
             context_text = "\n".join(context[-5:])  # Last 5 context items to avoid too much text
+            last_result_preview = json.dumps(last_result, indent=2)[:500] + "..."
             
-            reasoning_prompt = f"""Based on your recent action and its result, provide a brief reasoning summary.
-
-Recent context:
-{context_text}
-
-Last action: {last_function}
-Result: {json.dumps(last_result, indent=2)[:500]}...
-
-Provide a 2-3 sentence summary covering:
-1. What you learned from this action
-2. Why this action was important for your objective  
-3. What you plan to do next
-
-Keep it concise and focused on operational reasoning."""
+            reasoning_prompt = get_reasoning_summary_prompt(
+                context_text=context_text,
+                last_function=last_function,
+                last_result_preview=last_result_preview
+            )
 
             messages = [
                 {"role": "user", "content": reasoning_prompt}
@@ -606,5 +547,26 @@ Keep it concise and focused on operational reasoning."""
         try:
             reasoning = await self.get_reasoning_summary(context, function_name, result)
             print(f"\n💡 REASONING: {reasoning}")
+
+            # Optionally feed reasoning back into context for subsequent LLM calls
+            if self.config.get("reasoning_in_context", False):
+                context.append(f"REASONING: {reasoning}")
         except Exception as e:
             logger.error(f"Error displaying reasoning: {e}")
+
+    async def cleanup(self):
+        """Clean up resources."""
+        print("🧹 Cleaning up agent...")
+        if self.mcp_client:
+            await self.mcp_client.stop()
+        self.is_initialized = False
+        print("✅ Agent cleanup complete")
+    
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.initialize()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.cleanup()            

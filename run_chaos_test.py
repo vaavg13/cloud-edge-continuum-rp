@@ -10,6 +10,7 @@ import sys
 import os
 import time
 from pathlib import Path
+import subprocess
 
 # Add project root to path for imports
 project_root = Path(__file__).parent
@@ -113,6 +114,15 @@ def deploy_fresh_app_sync(config):
     app_dir = f"{config['app_directory']}/{app_name}"
     
     try:
+        # Delete the namespace first to ensure completely clean state
+        print(f"Deleting namespace to ensure clean state...")
+        delete_cmd = f"kubectl delete namespace {config['namespace']} --ignore-not-found=true"
+        subprocess.run(delete_cmd.split(), capture_output=True, text=True)
+        
+        # Wait for namespace deletion to complete
+        print(f"Waiting for namespace deletion to complete...")
+        time.sleep(15)
+        
         print(f"Undeploying existing {app_name}...")
         try:
             mgr = K8sDeploymentManager.from_deployment_dir(app_dir)
@@ -173,33 +183,16 @@ async def run_experiment(deployment_success=True, namespace=""):
         await test.emergency_cleanup()
         raise
 
-def print_final_results(results):
-    """Print final experiment results."""
-    print(f"\nFINAL EXPERIMENT STATUS")
-    print("=" * 40)
+def print_experiment_summary(results):
+    """Print experiment summary without status information."""
+    # Show phase metrics summary
+    if results.get('phase_metrics'):
+        print(f"\nPhase metrics collected:")
+        for phase, metrics in results['phase_metrics'].items():
+            print(f"  {phase}: {metrics['total_requests']} requests, {metrics['success_rate_percent']}% success")
     
-    if results.get("interrupted", False):
-        print(f"Status: INTERRUPTED")
-        print(f"Reason: {results['error']}")
-        print(f"Completed phases: {', '.join(results['phases_completed'])}")
-    elif results["success"]:
-        print(f"Status: SUCCESS")
-        print(f"Completed phases: {', '.join(results['phases_completed'])}")
-        
-        # Show phase metrics summary
-        if results.get('phase_metrics'):
-            print(f"\nPhase metrics collected:")
-            for phase, metrics in results['phase_metrics'].items():
-                print(f"  {phase}: {metrics['total_requests']} requests, {metrics['success_rate_percent']}% success")
-        
-        if results['agent_actions']:
-            print(f"\nAgent took {len(results['agent_actions'])} action(s)")
-    else:
-        print(f"Status: FAILED")
-        print(f"Error: {results['error']}")
-        print(f"Completed phases: {', '.join(results['phases_completed'])}")
-    
-    print("=" * 40)
+    if results.get('agent_actions'):
+        print(f"\nAgent took {len(results['agent_actions'])} action(s)")
 
 async def main_async(deployment_success, namespace):
     """Async part of main execution function."""
@@ -208,8 +201,8 @@ async def main_async(deployment_success, namespace):
         print(f"\nStarting experiment...")
         results = await run_experiment(deployment_success, namespace)
         
-        # Print final results
-        print_final_results(results)
+        # Print experiment summary
+        print_experiment_summary(results)
         
         # Return appropriate exit code
         return 0 if results["success"] else 1

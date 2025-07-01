@@ -47,42 +47,6 @@ def get_kubernetes_function_schemas() -> List[Dict[str, Any]]:
             }
         },
         {
-            "name": "replan_strategy", 
-            "description": "Reassess and create a new action plan when results are unexpected or when strategy needs adjustment. Use this when things don't go as expected.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "original_plan": {
-                        "type": "string",
-                        "description": "Summary of the original plan that was being executed"
-                    },
-                    "unexpected_results": {
-                        "type": "string",
-                        "description": "What happened that was different from expectations"
-                    },
-                    "lessons_learned": {
-                        "type": "string",
-                        "description": "Key insights gained from the unexpected results"
-                    },
-                    "new_objective": {
-                        "type": "string", 
-                        "description": "Updated objective based on new information"
-                    },
-                    "revised_steps": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "New list of steps to take, incorporating lessons learned"
-                    },
-                    "confidence_level": {
-                        "type": "string",
-                        "enum": ["high", "medium", "low"],
-                        "description": "Confidence level in the new plan"
-                    }
-                },
-                "required": ["original_plan", "unexpected_results", "new_objective", "revised_steps"]
-            }
-        },
-        {
             "name": "kubectl_apply",
             "description": "Apply a Kubernetes YAML manifest to create or update resources",
             "parameters": {
@@ -206,13 +170,13 @@ def get_kubernetes_function_schemas() -> List[Dict[str, Any]]:
         },
         {
             "name": "kubectl_patch",
-            "description": "Patch a Kubernetes resource with specific changes (useful for HPA modifications)",
+            "description": "Patch a Kubernetes resource with specific changes. CRITICAL: patchData must be a JSON object, never a string.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "resourceType": {
                         "type": "string",
-                        "description": "Type of resource to patch (e.g., 'hpa', 'deployment')"
+                        "description": "Type of resource to patch (e.g., 'deployment', 'hpa', 'service')"
                     },
                     "name": {
                         "type": "string",
@@ -224,11 +188,11 @@ def get_kubernetes_function_schemas() -> List[Dict[str, Any]]:
                     },
                     "patchType": {
                         "type": "string",
-                        "description": "Type of patch: 'strategic', 'merge', or 'json'"
+                        "description": "Type of patch: 'strategic' (default, best for deployments), 'merge' (JSON merge), or 'json' (JSON patch operations)"
                     },
                     "patchData": {
                         "type": "object",
-                        "description": "The patch data as a JSON object"
+                        "description": "CRITICAL: Must be a JSON object (not string). For deployment resource updates, use: {\"spec\": {\"template\": {\"spec\": {\"containers\": [{\"name\": \"container-name\", \"resources\": {\"requests\": {\"cpu\": \"500m\"}, \"limits\": {\"cpu\": \"1000m\"}}}]}}}}. For HPA updates, use: {\"spec\": {\"maxReplicas\": 10}}. Always verify container names match the deployment spec."
                     },
                     "dryRun": {
                         "type": "boolean",

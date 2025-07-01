@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional
+import subprocess
 
 # CRITICAL: Import TrafficGenerator FIRST (contains Locust) before Kubernetes
 # This ensures proper SSL monkey-patching order to prevent recursion errors
@@ -23,15 +24,21 @@ from .prometheus_utils import (
     format_pod_cpu, format_pod_memory, format_istio_latency,
     extract_prometheus_latency, extract_prometheus_cpu
 )
+from .experiment_utils import smart_warmup_with_monitoring
 
 logger = logging.getLogger(__name__)
 
 class ChaosAndMitigationTest:
     """Orchestrates chaos injection and agent mitigation testing."""
     
-    def __init__(self, experiment_config: Dict[str, Any], alert_config: Dict[str, Any]):
+    def __init__(self, 
+        experiment_config: Dict[str, Any], 
+        alert_config: Dict[str, Any],
+        reasoning_in_context: bool = False
+    ):
         self.config = experiment_config
         self.alert_config = alert_config
+        self.reasoning_in_context = reasoning_in_context
         
         # Initialize components
         self.chaos_generator = None
@@ -59,100 +66,10 @@ class ChaosAndMitigationTest:
             seed=self.config["chaos_config"]["seed"]
         )
         
-        # Prometheus tool already initialized in __init__
-        # self.prometheus_tool = PrometheusMetricsTool()
-        
         # Initialize agent (will be created fresh each time)
         self.agent = None
         self.baseline_metrics = None
         self.baseline_prometheus_metrics = None
-
-    async def _smart_warmup_with_monitoring(self):
-        """Smart warmup that monitors latency until it stabilizes."""
-        max_warmup_time = self.config["pod_warmup_duration"]  # Safety limit
-        check_interval = 30  # Check every 30 seconds
-        stability_window = 3  # Need 3 stable measurements
-        stability_threshold = 0.3  # Latency variation < 30% to consider stable
-        min_success_rate = 70  # Minimum success rate to consider healthy
-        
-        latency_history = []
-        elapsed_time = 0
-        stable_count = 0
-        
-        print(f"🔄 Monitoring warmup (max {max_warmup_time}s, checking every {check_interval}s)")
-        print(f"📊 Looking for latency stabilization: <{stability_threshold*100}% variation for {stability_window} measurements")
-        
-        # Reset metrics at start of warmup
-        self.traffic_generator.reset_phase_metrics()
-        
-        while elapsed_time < max_warmup_time:
-            await asyncio.sleep(check_interval)
-            elapsed_time += check_interval
-            
-            # Get current metrics for this check interval
-            metrics = self.traffic_generator.get_phase_metrics(check_interval)
-            
-            # Reset metrics after reading (so next measurement is clean)
-            self.traffic_generator.reset_phase_metrics()
-            
-            if not metrics or metrics.get('total_requests', 0) == 0:
-                print(f"⏳ {elapsed_time}s: No requests yet, continuing warmup...")
-                continue
-                
-            current_latency = metrics.get('p95_latency_seconds', 0)
-            success_rate = metrics.get('success_rate_percent', 0)
-            
-            print(f"📈 {elapsed_time}s: P95={current_latency:.3f}s, Success={success_rate:.1f}%, Req={metrics.get('total_requests', 0)}")
-            
-            # Check if service is healthy enough to measure
-            if success_rate < min_success_rate:
-                print(f"⚠️  Success rate too low ({success_rate:.1f}% < {min_success_rate}%), continuing warmup...")
-                latency_history.clear()  # Reset history due to unhealthy state
-                stable_count = 0
-                continue
-            
-            # Add to latency history
-            latency_history.append(current_latency)
-            
-            # Only start checking stability after we have enough history
-            if len(latency_history) < stability_window:
-                continue
-                
-            # Keep only recent history
-            if len(latency_history) > stability_window:
-                latency_history.pop(0)
-            
-            # Check if latency is stable (low variation)
-            if len(latency_history) == stability_window:
-                min_latency = min(latency_history)
-                max_latency = max(latency_history)
-                
-                # Avoid division by zero
-                if min_latency > 0:
-                    variation = (max_latency - min_latency) / min_latency
-                    
-                    if variation <= stability_threshold:
-                        stable_count += 1
-                        print(f"✅ Stable measurement {stable_count}: variation {variation:.2%} (threshold: {stability_threshold:.0%})")
-                        
-                        # Consider stable if we have enough consecutive stable measurements
-                        if stable_count >= 2:  # At least 2 consecutive stable intervals
-                            print(f"🎯 Latency stabilized at ~{current_latency:.3f}s after {elapsed_time}s")
-                            print(f"✅ Warmup complete - services ready for baseline measurement")
-                            return
-                    else:
-                        stable_count = 0
-                        print(f"📊 Variation {variation:.2%} > {stability_threshold:.0%}, waiting for stability...")
-        
-        # If we exit the loop, we hit max time
-        if latency_history:
-            avg_latency = sum(latency_history) / len(latency_history)
-            print(f"⏰ Max warmup time reached ({max_warmup_time}s)")
-            print(f"📊 Final average latency: {avg_latency:.3f}s")
-        else:
-            print(f"⚠️  Warmup completed without stable measurements")
-        
-        print(f"✅ Proceeding to baseline measurement")
 
     async def inject_chaos(self) -> bool:
         """Inject chaos into the target application."""
@@ -163,35 +80,48 @@ class ChaosAndMitigationTest:
         
         # Create chaos experiment
         self.chaos_experiment = {
-            "name": f"{self.config['chaos_config']['fault_type']}-{self.config['target_app']}-{self.config['chaos_config']['intensity']}".replace("_", "-"),
-            "fault_type": self.config['chaos_config']["fault_type"],
-            "app": self.config["target_app"],
-            "intensity": self.config['chaos_config']["intensity"],
-            "template": self.chaos_generator.create_experiment_template(
-                self.config['chaos_config']["fault_type"], 
-                self.config["target_app"], 
-                self.config['chaos_config']["intensity"],
-                self.config['chaos_config']  # Pass the full chaos config for targeting
-            )
+            "name": f"{self.config['chaos_config']['fault_type']}-{self.config['target_app']}-{self.config['chaos_config']['intensity']}",
+            "app": self.config['target_app'],
+            "config": self.config['chaos_config']
         }
         
-        # Set indefinite duration - chaos runs until manually cleaned up
-        self.chaos_experiment["template"]["spec"]["duration"] = self.config["chaos_duration"]
+        # Generate and deploy chaos experiment
+        template = self.chaos_generator.create_experiment_template(
+            self.chaos_experiment["config"]["fault_type"],
+            self.chaos_experiment["app"],
+            self.chaos_experiment["config"]["intensity"],
+            self.chaos_experiment["config"]
+        )
         
-        # Deploy the chaos experiment
-        success = self.chaos_generator.deploy_experiment(self.chaos_experiment)
+        # Set experiment duration to 1 hour (will be cleaned up by stop_chaos)
+        if template and "spec" in template:
+            template["spec"]["duration"] = "3600s"
         
-        if success:
-            print("✅ Chaos experiment deployed (will run until manually stopped)")
+        deployment_success = self.chaos_generator.deploy_experiment({
+            "name": self.chaos_experiment["name"],
+            "template": template,
+            "fault_type": self.chaos_experiment["config"]["fault_type"],
+            "app": self.chaos_experiment["app"],
+            "intensity": self.chaos_experiment["config"]["intensity"]
+        })
+        
+        if deployment_success:
+            print(f"✅ Chaos experiment deployed (will run until manually stopped)")
+            
             return True
         else:
-            print("❌ Failed to deploy chaos experiment")
+            print(f"❌ Failed to deploy chaos experiment")
             return False
     
-    async def deploy_mitigation_agent(self, chaos_metrics: Dict[str, Any], chaos_prometheus_metrics: Dict[str, Any]) -> list:
+    async def deploy_mitigation_agent(self, 
+        chaos_metrics: Dict[str, Any], 
+        chaos_prometheus_metrics: Dict[str, Any],
+        reasoning_in_context: bool = False
+    ) -> list:
         """Deploy the agent to mitigate the issues."""
         print(f"🤖 Deploying mitigation agent...")
         print(f"⚙️  Max rounds: {self.config['agent_config']['max_rounds']}, timeout: {self.config['agent_config']['agent_timeout']}s")
+        print(f"🔍  Reasoning in context: {self.config['agent_config']['reasoning_in_context']}")
         
         # Initialize agent fresh for this execution
         self.agent = KubernetesAgent(config=self.config["agent_config"])
@@ -202,8 +132,15 @@ class ChaosAndMitigationTest:
         self._current_prometheus_metrics = chaos_prometheus_metrics
         
         # Extract Prometheus metrics for alert context
-        baseline_p95 = extract_prometheus_latency(self.baseline_prometheus_metrics, self.config["namespace"]) if self.baseline_prometheus_metrics else 'unknown'
-        current_p95 = extract_prometheus_latency(chaos_prometheus_metrics, self.config["namespace"]) if chaos_prometheus_metrics else 'unknown'
+        baseline_p95 = extract_prometheus_latency(
+            self.baseline_prometheus_metrics, 
+            self.config["namespace"]
+        ) if self.baseline_prometheus_metrics else 'unknown'
+        
+        current_p95 = extract_prometheus_latency(
+            chaos_prometheus_metrics, 
+            self.config["namespace"]
+        ) if chaos_prometheus_metrics else 'unknown'
         
         # Create alert intent
         intent = self.alert_config["alert_template"].format(
@@ -322,14 +259,14 @@ class ChaosAndMitigationTest:
         if self.traffic_generator:
             await self.traffic_generator.stop_traffic()
             print("Traffic generation stopped")
-        
+            
         # Clean up agent
         if self.agent:
             await self.agent.cleanup()
             print("Agent cleaned up")
-        
+            
         print("Remaining test resources cleaned up")
-    
+
     def print_experiment_summary(self, phase_metrics: Dict, agent_actions: list):
         """Print final experiment summary with phase comparisons."""
         print(f"\n" + "=" * 50)
@@ -351,11 +288,21 @@ class ChaosAndMitigationTest:
             baseline_success = phase_metrics["baseline"]["success_rate_percent"]
             chaos_success = phase_metrics["chaos"]["success_rate_percent"]
             
+            # Check if baseline is placeholder (from skipped mode)
+            is_placeholder_baseline = (baseline_p95 == 0.1 and 
+                                     phase_metrics["baseline"]["total_requests"] == 0)
+            
             print(f"\n💥 IMPACT:")
-            if baseline_p95 > 0:
+            if baseline_p95 > 0 and not is_placeholder_baseline:
                 degradation = (chaos_p95 / baseline_p95)
                 print(f"📈 Latency: {degradation:.2f}x worse ({baseline_p95:.3f}s → {chaos_p95:.3f}s)")
-            print(f"📉 Success rate: {baseline_success:.1f}% → {chaos_success:.1f}%")
+                print(f"📉 Success rate: {baseline_success:.1f}% → {chaos_success:.1f}%")
+            elif is_placeholder_baseline:
+                print(f"📈 Chaos latency: {chaos_p95:.3f}s (baseline skipped)")
+                print(f"📉 Chaos success rate: {chaos_success:.1f}% (baseline skipped)")
+            else:
+                print(f"📈 Latency comparison not available")
+                print(f"📉 Success rate: {baseline_success:.1f}% → {chaos_success:.1f}%")
             
             # Recovery
             if "recovery" in phase_metrics:
@@ -393,36 +340,66 @@ class ChaosAndMitigationTest:
             print(f"✅ Using already deployed application in namespace: {deployment_namespace}")
             results["phases_completed"].append("deployment")
             
-            # === PHASE 1: POD WARMUP ===
-            print(f"\n🚀 === PHASE 1: POD WARMUP ===")
-            await self.traffic_generator.start_traffic()
-            print(f"Starting service warmup with latency monitoring...")
+            # Check if we should skip warmup and baseline phases
+            skip_warmup_baseline = self.config.get("test_settings", {}).get("skip_warmup_baseline", False)
             
-            # Smart warmup with latency stabilization detection
-            await self._smart_warmup_with_monitoring()
-            
-            results["phases_completed"].append("pod_warmup")
-            
-            # === PHASE 2: BASELINE METRICS ===
-            print(f"\n📊 === PHASE 2: BASELINE METRICS ===")
-            # Reset metrics at START of baseline measurement phase
-            self.traffic_generator.reset_phase_metrics()
-            print(f"Recording baseline metrics for {self.config['baseline_duration']}s...")
-            await asyncio.sleep(self.config["baseline_duration"])
-            
-            # Collect both traffic generator and Prometheus baseline metrics
-            baseline_metrics = self.traffic_generator.get_phase_metrics(self.config["baseline_duration"])
-            self.baseline_metrics = baseline_metrics
-            
-            # Collect Prometheus baseline metrics for agent context
-            print(f"📈 Collecting Prometheus baseline metrics...")
-            self.baseline_prometheus_metrics = self.prometheus_tool.get_metrics_summary(self.config["namespace"])
-            
-            results["phase_metrics"]["baseline"] = baseline_metrics
-            print(f"✅ Baseline: {baseline_metrics['total_requests']} req ({baseline_metrics['expected_requests']} expected)")
-            print(f"    Success: {baseline_metrics['success_rate_percent']}%, P95: {baseline_metrics['p95_latency_seconds']}s, Duration: {baseline_metrics['actual_duration_seconds']}s, RPS: {baseline_metrics.get('current_rps', 0)}")
-            print(f"✅ Prometheus baseline captured for agent reference")
-            results["phases_completed"].append("baseline")
+            if skip_warmup_baseline:
+                print(f"\n⚡ === SKIPPING WARMUP & BASELINE (FAST MODE) ===")
+                print(f"🚀 Starting traffic generation without warmup...")
+                await self.traffic_generator.start_traffic()
+                
+                # Brief startup to ensure traffic is flowing
+                await asyncio.sleep(10)
+                
+                # Create minimal baseline metrics for agent context
+                print(f"📈 Collecting minimal Prometheus metrics for agent context...")
+                self.baseline_prometheus_metrics = self.prometheus_tool.get_metrics_summary(self.config["namespace"])
+                
+                # Create placeholder baseline metrics
+                self.baseline_metrics = {
+                    "total_requests": 0,
+                    "success_rate_percent": 100.0,
+                    "p95_latency_seconds": 0.1,
+                    "actual_duration_seconds": 0,
+                    "current_rps": 0,
+                    "expected_requests": 0
+                }
+                
+                results["phase_metrics"]["baseline"] = self.baseline_metrics
+                print(f"✅ Fast mode enabled - skipped warmup and baseline phases")
+                results["phases_completed"].extend(["pod_warmup", "baseline"])
+                
+            else:
+                # === PHASE 1: POD WARMUP ===
+                print(f"\n🚀 === PHASE 1: POD WARMUP ===")
+                await self.traffic_generator.start_traffic()
+                print(f"Starting service warmup with latency monitoring...")
+                
+                # Smart warmup with latency stabilization detection
+                await smart_warmup_with_monitoring(self.config, self.traffic_generator)
+                
+                results["phases_completed"].append("pod_warmup")
+                
+                # === PHASE 2: BASELINE METRICS ===
+                print(f"\n📊 === PHASE 2: BASELINE METRICS ===")
+                # Reset metrics at START of baseline measurement phase
+                self.traffic_generator.reset_phase_metrics()
+                print(f"Recording baseline metrics for {self.config['baseline_duration']}s...")
+                await asyncio.sleep(self.config["baseline_duration"])
+                
+                # Collect both traffic generator and Prometheus baseline metrics
+                baseline_metrics = self.traffic_generator.get_phase_metrics(self.config["baseline_duration"])
+                self.baseline_metrics = baseline_metrics
+                
+                # Collect Prometheus baseline metrics for agent context
+                print(f"📈 Collecting Prometheus baseline metrics...")
+                self.baseline_prometheus_metrics = self.prometheus_tool.get_metrics_summary(self.config["namespace"])
+                
+                results["phase_metrics"]["baseline"] = baseline_metrics
+                print(f"✅ Baseline: {baseline_metrics['total_requests']} req ({baseline_metrics['expected_requests']} expected)")
+                print(f"    Success: {baseline_metrics['success_rate_percent']}%, P95: {baseline_metrics['p95_latency_seconds']}s, Duration: {baseline_metrics['actual_duration_seconds']}s, RPS: {baseline_metrics.get('current_rps', 0)}")
+                print(f"✅ Prometheus baseline captured for agent reference")
+                results["phases_completed"].append("baseline")
             
             # === CHAOS INJECTION ===
             print(f"\n💥 === CHAOS INJECTION ===")
@@ -494,4 +471,4 @@ class ChaosAndMitigationTest:
             if results.get("interrupted", False):
                 await self.emergency_cleanup()
             else:
-                await self.cleanup_remaining_resources() 
+                await self.cleanup_remaining_resources()
