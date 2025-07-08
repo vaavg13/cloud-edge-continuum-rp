@@ -13,12 +13,24 @@ EXPERIMENT_CONFIG = {
     
     # Chaos configuration
     # Note: chaos_duration is calculated automatically based on phases
+    
+    # PREVIOUS CPU STRESS EXPERIMENT (commented out):
+    # "chaos_config": {
+    #     "fault_type": "cpu_stress",
+    #     "intensity": "extreme",  # extreme, high, medium, low
+    #     "seed": 42,
+    #     "target_mode": "one",  # "one", "all", "fixed", "fixed-percent", "random-max-percent"
+    #     "target_value": "",    # Used with fixed/fixed-percent/random-max-percent modes
+    # },
+    
+    # POD FAILURE EXPERIMENT:
     "chaos_config": {
-        "fault_type": "cpu_stress",
-        "intensity": "extreme",  # extreme, high, medium, low
+        "fault_type": "pod_failure",
+        "intensity": "medium",   # Not directly used for pod failure but kept for consistency
+        "duration": "600s",      # Really big duration - pod stays down for 10 minutes
         "seed": 42,
-        "target_mode": "one",  # "one", "all", "fixed", "fixed-percent", "random-max-percent"
-        "target_value": "",    # Used with fixed/fixed-percent/random-max-percent modes
+        "target_mode": "all",    # "one", "all", "fixed", "fixed-percent", "random-max-percent"
+        "target_value": "",      # Used with fixed/fixed-percent/random-max-percent modes
     },
     
     # Agent configuration

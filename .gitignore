@@ -9,6 +9,7 @@ APPS/
 EXPERIMENTS/
 EXPERIMENT/
 DATA/
+tex/
 
 # Cursor stuff
 .cursor/

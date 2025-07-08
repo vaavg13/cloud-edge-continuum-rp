@@ -25,35 +25,23 @@ INTENSITY_PARAMS = {
         "high": {"workers": 2, "size": "1GB"},
         "extreme": {"workers": 4, "size": "2GB"}
     },
-    "network_delay": {
-        "low": {"latency": "50ms", "jitter": "10ms"},
-        "medium": {"latency": "200ms", "jitter": "50ms"},
-        "high": {"latency": "500ms", "jitter": "100ms"},
-        "extreme": {"latency": "1000ms", "jitter": "200ms"}
+    "node_cpu_stress": {
+        "low": {"workers": 2, "load": 60},
+        "medium": {"workers": 4, "load": 80},
+        "high": {"workers": 8, "load": 90},
+        "extreme": {"workers": 16, "load": 100}
     },
-    "network_loss": {
-        "low": {"loss": "5"}, "medium": {"loss": "25"},
-        "high": {"loss": "50"}, "extreme": {"loss": "80"}
+    "node_memory_stress": {
+        "low": {"workers": 2, "size": "512MB"},
+        "medium": {"workers": 4, "size": "1GB"},
+        "high": {"workers": 6, "size": "2GB"},
+        "extreme": {"workers": 8, "size": "4GB"}
     },
-    "network_duplicate": {
-        "low": {"duplicate": "10"}, "medium": {"duplicate": "50"},
-        "high": {"duplicate": "80"}, "extreme": {"duplicate": "100"}
-    },
-    "network_corrupt": {
-        "low": {"corrupt": "10"}, "medium": {"corrupt": "30"},
-        "high": {"corrupt": "60"}, "extreme": {"corrupt": "90"}
-    },
-    "network_bandwidth": {
-        "low": {"rate": "10mbps", "limit": 102400, "buffer": 50000},
-        "medium": {"rate": "1mbps", "limit": 20480, "buffer": 10000},
-        "high": {"rate": "100kbps", "limit": 2048, "buffer": 1000},
-        "extreme": {"rate": "10kbps", "limit": 512, "buffer": 100}
-    }
+
 }
 
-FAULT_TYPES = ["cpu_stress", "memory_stress", "pod_failure", "network_delay", 
-                           "network_loss", "network_partition", "network_duplicate", 
-                           "network_corrupt", "network_bandwidth"]
+FAULT_TYPES = ["cpu_stress", "memory_stress", "pod_failure", "node_cpu_stress", 
+               "node_memory_stress"]
 INTENSITIES = ["low", "medium", "high", "extreme"]
 
 
@@ -75,9 +63,14 @@ class ChaosBenchmarkGenerator:
         # Get targeting configuration
         target_mode = "one"  # Default
         target_value = ""
+        physical_machine_config = {}
+        duration = "60s"  # Default duration
+        
         if chaos_config:
             target_mode = chaos_config.get("target_mode", "one")
             target_value = chaos_config.get("target_value", "")
+            physical_machine_config = chaos_config.get("physical_machine_config", {})
+            duration = chaos_config.get("duration", "60s")
         
         base_template = {
             "apiVersion": "chaos-mesh.org/v1alpha1",
@@ -87,11 +80,7 @@ class ChaosBenchmarkGenerator:
             },
             "spec": {
                 "mode": target_mode,
-                "selector": {
-                    "namespaces": [self.namespace],
-                    "labelSelectors": {"app": app}
-                },
-                "duration": "60s"
+                "duration": duration
             }
         }
         
@@ -99,8 +88,13 @@ class ChaosBenchmarkGenerator:
         if target_mode in ["fixed", "fixed-percent", "random-max-percent"] and target_value:
             base_template["spec"]["value"] = target_value
         
+        # Pod-level chaos (existing patterns)
         if fault_type in ["cpu_stress", "memory_stress"]:
             base_template["kind"] = "StressChaos"
+            base_template["spec"]["selector"] = {
+                "namespaces": [self.namespace],
+                "labelSelectors": {"app": app}
+            }
             stressor_type = fault_type.split("_")[0]
             base_template["spec"]["stressors"] = {
                 stressor_type: INTENSITY_PARAMS[fault_type][intensity]
@@ -108,27 +102,41 @@ class ChaosBenchmarkGenerator:
         
         elif fault_type == "pod_failure":
             base_template["kind"] = "PodChaos"
-            base_template["spec"]["action"] = "pod-kill"
-            base_template["spec"]["duration"] = "30s"
+            base_template["spec"]["selector"] = {
+                "namespaces": [self.namespace],
+                "labelSelectors": {"app": app}
+            }
+            base_template["spec"]["action"] = "pod-failure"
         
-        elif fault_type.startswith("network"):
-            base_template["kind"] = "NetworkChaos"
-            action = fault_type.replace("network_", "")
-            base_template["spec"]["action"] = action
+        # Node-level chaos using PhysicalMachineChaos
+        elif fault_type in ["node_cpu_stress", "node_memory_stress"]:
+            base_template["kind"] = "PhysicalMachineChaos"
             
-            if action == "partition":
-                base_template["spec"]["direction"] = "both"
-                base_template["spec"]["target"] = {
-                    "mode": "all",
-                    "selector": {"labelSelectors": {"app": "any-service"}}
-                }
-            elif action in INTENSITY_PARAMS:
+            # Configure physical machine targeting
+            if physical_machine_config.get("addresses"):
+                base_template["spec"]["address"] = physical_machine_config["addresses"]
+            elif physical_machine_config.get("selector"):
+                base_template["spec"]["selector"] = physical_machine_config["selector"]
+            else:
+                # Fallback to placeholder
+                base_template["spec"]["address"] = ["PHYSICAL_MACHINE_ADDRESS_TO_BE_CONFIGURED"]
+            
+            # Set the action based on fault type
+            if fault_type == "node_cpu_stress":
+                base_template["spec"]["action"] = "stress-cpu"
                 params = INTENSITY_PARAMS[fault_type][intensity]
-                base_template["spec"][action] = params
-                if action == "delay":
-                    base_template["spec"][action]["correlation"] = "100"
-                elif action in ["loss", "duplicate", "corrupt"]:
-                    base_template["spec"][action]["correlation"] = "100"
+                base_template["spec"]["stress-cpu"] = {
+                    "workers": params["workers"],
+                    "load": params["load"]
+                }
+            
+            elif fault_type == "node_memory_stress":
+                base_template["spec"]["action"] = "stress-mem" 
+                params = INTENSITY_PARAMS[fault_type][intensity]
+                base_template["spec"]["stress-mem"] = {
+                    "workers": params["workers"],
+                    "size": params["size"]
+                }
         
         return base_template
     
@@ -200,8 +208,10 @@ class ChaosBenchmarkGenerator:
                 chaos_type = "stresschaos"
             elif fault_type == "pod_failure":
                 chaos_type = "podchaos"
+            elif fault_type in ["node_cpu_stress", "node_memory_stress"]:
+                chaos_type = "physicalmachinechaos"
             else:
-                chaos_type = "networkchaos"
+                chaos_type = "chaos"  # fallback
             
             # Check if chaos resource exists
             cmd = f"kubectl get {chaos_type} {name} -n {self.namespace} -o yaml"
@@ -218,22 +228,27 @@ class ChaosBenchmarkGenerator:
             else:
                 return
             
-            # Check target pods
-            target_app = template['spec']['selector']['labelSelectors']['app']
-            
-            pod_cmd = f"kubectl get pods -n {self.namespace} -l app={target_app} -o wide"
-            pod_result = subprocess.run(pod_cmd.split(), capture_output=True, text=True)
-            
-            if pod_result.returncode == 0:
-                # Count pods
-                pod_lines = [line for line in pod_result.stdout.split('\n') if line.strip() and not line.startswith('NAME')]
-                pod_count = len(pod_lines)
+            # Check target pods for pod-level chaos
+            if fault_type in ["cpu_stress", "memory_stress", "pod_failure"]:
+                target_app = template['spec']['selector']['labelSelectors']['app']
                 
-                if pod_count == 0:
-                    all_pods_cmd = f"kubectl get pods -n {self.namespace} --show-labels"
-                    all_pods_result = subprocess.run(all_pods_cmd.split(), capture_output=True, text=True)
-                    if all_pods_result.returncode == 0:
-                        pass
+                pod_cmd = f"kubectl get pods -n {self.namespace} -l app={target_app} -o wide"
+                pod_result = subprocess.run(pod_cmd.split(), capture_output=True, text=True)
+                
+                if pod_result.returncode == 0:
+                    # Count pods
+                    pod_lines = [line for line in pod_result.stdout.split('\n') if line.strip() and not line.startswith('NAME')]
+                    pod_count = len(pod_lines)
+                    
+                    if pod_count == 0:
+                        all_pods_cmd = f"kubectl get pods -n {self.namespace} --show-labels"
+                        all_pods_result = subprocess.run(all_pods_cmd.split(), capture_output=True, text=True)
+                        if all_pods_result.returncode == 0:
+                            pass
+            else:
+                # For PhysicalMachineChaos, verify physical machine connectivity
+                print(f"ℹ️  PhysicalMachineChaos {name} deployed - requires physical machine address configuration")
+                
         except Exception as e:
             pass
     
@@ -248,8 +263,10 @@ class ChaosBenchmarkGenerator:
                 chaos_type = "stresschaos"
             elif fault_type == "pod_failure":
                 chaos_type = "podchaos"
+            elif fault_type in ["node_cpu_stress", "node_memory_stress"]:
+                chaos_type = "physicalmachinechaos"
             else:
-                chaos_type = "networkchaos"
+                chaos_type = "chaos"  # fallback
             
             # Delete experiment
             cmd = f"kubectl delete {chaos_type} {name} -n {self.namespace} --ignore-not-found=true"
