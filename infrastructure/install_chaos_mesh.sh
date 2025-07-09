@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Chaos Mesh Installation and Testing Script
+# Chaos Mesh Installation Script for k3s
 # Based on: https://chaos-mesh.org/docs/production-installation-using-helm/
 
 set -e  # Exit on any error
@@ -105,7 +105,12 @@ install_chaos_mesh() {
     
     helm install $RELEASE_NAME chaos-mesh/chaos-mesh -n=$NAMESPACE \
         --set chaosDaemon.runtime=containerd \
-        --set chaosDaemon.socketPath=/run/k3s/containerd/containerd.sock
+        --set chaosDaemon.socketPath=/run/k3s/containerd/containerd.sock \
+        --set controllerManager.replicaCount=1 \
+        --set controllerManager.nodeSelector."node-role\.kubernetes\.io/control-plane"=true \
+        --set controllerManager.tolerations[0].key=node-role.kubernetes.io/control-plane \
+        --set controllerManager.tolerations[0].operator=Exists \
+        --set controllerManager.tolerations[0].effect=NoSchedule
     
     print_success "Chaos Mesh installation completed"
 }
