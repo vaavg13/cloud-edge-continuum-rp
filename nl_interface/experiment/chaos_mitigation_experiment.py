@@ -7,9 +7,8 @@ Main test class that orchestrates app deployment, chaos injection, and agent mit
 import asyncio
 import time
 import logging
-from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import subprocess
 
 # CRITICAL: Import TrafficGenerator FIRST (contains Locust) before Kubernetes
@@ -17,31 +16,28 @@ import subprocess
 from .traffic_generator import LocustTrafficGenerator
 
 # Import other project modules
-from .chaos_templates_generator import ChaosBenchmarkGenerator
+from ..anomalies.docker_constraints_handler import DockerConstraintsHandler
+from ..anomalies.chaos_mesh_handler import ChaosMeshHandler
 from nl_interface.agent.agent import KubernetesAgent
 from nl_interface.shared.prometheus_client import PrometheusMetricsTool
-from .prometheus_utils import (
-    format_pod_cpu, format_pod_memory, format_istio_latency,
-    extract_prometheus_latency, extract_prometheus_cpu
-)
+from .experiment_utils import extract_prometheus_latency
 from .experiment_utils import smart_warmup_with_monitoring
 
 logger = logging.getLogger(__name__)
 
-class ChaosAndMitigationTest:
+class ChaosAndMitigationExperiment:
     """Orchestrates chaos injection and agent mitigation testing."""
     
     def __init__(self, 
         experiment_config: Dict[str, Any], 
-        alert_config: Dict[str, Any],
-        reasoning_in_context: bool = False
+        alert_config: Dict[str, Any]
     ):
         self.config = experiment_config
         self.alert_config = alert_config
-        self.reasoning_in_context = reasoning_in_context
         
         # Initialize components
-        self.chaos_generator = None
+        self.docker_handler = None
+        self.chaos_mesh_handler = None
         self.agent = None
         self.traffic_generator = None
         self.chaos_experiment = None
@@ -56,67 +52,56 @@ class ChaosAndMitigationTest:
         
     async def setup(self):
         """Setup chaos and mitigation components."""
+        # Initialize handlers
+        self.docker_handler = DockerConstraintsHandler(self.config)
+        self.chaos_mesh_handler = ChaosMeshHandler(self.config)
+        
+        # PRE-RUN SETUP: Set all nodes to proper resource specifications
+        print(f"🧹 === PRE-RUN RESOURCE SETUP ===")
+        self.docker_handler.reset_all_node_docker_constraints()
+        
         # Initialize traffic generator
         self.traffic_generator = LocustTrafficGenerator(self.config["traffic_config"])
-        
-        # Initialize chaos generator  
-        self.chaos_generator = ChaosBenchmarkGenerator(
-            namespace=self.config["namespace"],
-            app_list=[self.config["target_app"]],
-            seed=self.config["chaos_config"]["seed"]
-        )
         
         # Initialize agent (will be created fresh each time)
         self.agent = None
         self.baseline_metrics = None
         self.baseline_prometheus_metrics = None
 
+
+    
     async def inject_chaos(self) -> bool:
-        """Inject chaos into the target application."""
-        print(f"🎯 Target: {self.config['target_app']}")
-        print(f"⚔️  Type: {self.config['chaos_config']['fault_type']} ({self.config['chaos_config']['intensity']})")
-        print(f"🎲 Mode: {self.config['chaos_config'].get('target_mode', 'one')} replica(s)")
+        """Inject chaos into the target application based on configuration mode."""
+        config = self.config['chaos_config']
+        mode = config['mode']
+        fault_type = config['fault_type']
+        
+        print(f"🔧 Mode: {mode}")
+        print(f"⚔️  Type: {fault_type} ({config['intensity']})")
         print(f"⏰ Duration: Indefinite (cleaned up after agent completes)")
         
-        # Create chaos experiment
-        self.chaos_experiment = {
-            "name": f"{self.config['chaos_config']['fault_type']}-{self.config['target_app']}-{self.config['chaos_config']['intensity']}",
-            "app": self.config['target_app'],
-            "config": self.config['chaos_config']
-        }
-        
-        # Generate and deploy chaos experiment
-        template = self.chaos_generator.create_experiment_template(
-            self.chaos_experiment["config"]["fault_type"],
-            self.chaos_experiment["app"],
-            self.chaos_experiment["config"]["intensity"],
-            self.chaos_experiment["config"]
-        )
-        
-        # Set experiment duration to 1 hour (will be cleaned up by stop_chaos)
-        if template and "spec" in template:
-            template["spec"]["duration"] = "3600s"
-        
-        deployment_success = self.chaos_generator.deploy_experiment({
-            "name": self.chaos_experiment["name"],
-            "template": template,
-            "fault_type": self.chaos_experiment["config"]["fault_type"],
-            "app": self.chaos_experiment["app"],
-            "intensity": self.chaos_experiment["config"]["intensity"]
-        })
-        
-        if deployment_success:
-            print(f"✅ Chaos experiment deployed (will run until manually stopped)")
-            
-            return True
-        else:
-            print(f"❌ Failed to deploy chaos experiment")
+        if mode == "docker_only":
+            experiment_record = self.docker_handler.inject_docker_constraints_only(config)
+            if experiment_record:
+                # For docker_only mode, no specific app targeting
+                self.chaos_experiment = experiment_record
+                return True
             return False
+        elif mode == "chaos_only":
+            experiment_record = self.chaos_mesh_handler.inject_chaos_mesh_only(config)
+            if experiment_record:
+                self.chaos_experiment = experiment_record
+                return True
+            return False
+        else:
+            print(f"❌ Unknown chaos mode: {mode}")
+            return False
+    
+
     
     async def deploy_mitigation_agent(self, 
         chaos_metrics: Dict[str, Any], 
-        chaos_prometheus_metrics: Dict[str, Any],
-        reasoning_in_context: bool = False
+        chaos_prometheus_metrics: Dict[str, Any]
     ) -> list:
         """Deploy the agent to mitigate the issues."""
         print(f"🤖 Deploying mitigation agent...")
@@ -129,7 +114,6 @@ class ChaosAndMitigationTest:
         
         # Store metrics for context
         self.current_metrics = chaos_metrics
-        self._current_prometheus_metrics = chaos_prometheus_metrics
         
         # Extract Prometheus metrics for alert context
         baseline_p95 = extract_prometheus_latency(
@@ -189,7 +173,12 @@ class ChaosAndMitigationTest:
     def _cleanup_chaos_sync(self) -> bool:
         """Synchronous chaos cleanup function to run in thread executor."""
         if self.chaos_experiment:
-            return self.chaos_generator.undeploy_experiment(self.chaos_experiment)
+            # Check if this is a Docker-only experiment
+            if self.chaos_experiment.get("docker_only", False):
+                print(f"ℹ️  Docker-only experiment - skipping Chaos Mesh cleanup")
+                return True
+            else:
+                return self.chaos_mesh_handler.cleanup_chaos_experiment(self.chaos_experiment)
         return True
 
     async def cleanup_chaos(self):
@@ -246,6 +235,7 @@ class ChaosAndMitigationTest:
         
         print("=" * 40)
         print("Emergency cleanup completed - safe to exit")
+        print("Next run will automatically set all nodes to proper resource limits")
 
     async def cleanup_remaining_resources(self):
         """Clean up remaining resources (traffic, agent) after chaos is already cleaned."""

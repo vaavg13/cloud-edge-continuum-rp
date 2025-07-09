@@ -24,13 +24,13 @@ except ImportError:
     pass  # If Locust not available, continue without it
 
 # Import configuration and test modules
-from nl_interface.anomalies.experiment_utils import (
+from nl_interface.experiment.experiment_utils import (
     get_experiment_config, 
     get_alert_config, 
     get_logging_config,
     validate_config
 )
-from nl_interface.anomalies.chaos_mitigation import ChaosAndMitigationTest
+from nl_interface.experiment.chaos_mitigation_experiment import ChaosAndMitigationExperiment
 from mu_bench.deployers.manager import K8sDeploymentManager
 from kubernetes import client, config
 
@@ -110,7 +110,7 @@ def deploy_fresh_app_sync(config):
         
     print(f"\nDeploying fresh application...")
     
-    app_name = "app-edge"
+    app_name = "app-iot-gateway"
     app_dir = f"{config['app_directory']}/{app_name}"
     
     try:
@@ -156,7 +156,7 @@ def print_experiment_info():
     
     print("CHAOS EXPERIMENT CONFIGURATION")
     print("=" * 40)
-    print(f"Target: {config['target_app']} ({config['namespace']})")
+    print(f"Namespace: {config['namespace']}")
     print(f"Chaos: {config['chaos_config']['fault_type']} ({config['chaos_config']['intensity']}, {config['chaos_duration']})")
     print(f"Duration: ~{config['monitoring_duration']//60} minutes")
     print(f"Agent: {config['agent_config']['openai_model']} (max {config['agent_config']['max_rounds']} rounds)")
@@ -169,7 +169,7 @@ async def run_experiment(deployment_success=True, namespace=""):
     alert_config = get_alert_config()
     
     # Create test instance
-    test = ChaosAndMitigationTest(experiment_config, alert_config)
+    test = ChaosAndMitigationExperiment(experiment_config, alert_config)
     
     try:
         # Run the experiment, indicating deployment was already done

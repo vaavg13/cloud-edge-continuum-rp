@@ -5,6 +5,7 @@ Helper functions for experiment configuration and validation.
 """
 
 import asyncio
+from typing import Dict, Any
 from .experiment_config import EXPERIMENT_CONFIG, ALERT_CONFIG, LOGGING_CONFIG
 
 async def smart_warmup_with_monitoring(config, traffic_generator):
@@ -167,7 +168,7 @@ def get_logging_config():
 def validate_config():
     """Validate that all required configuration is present."""
     required_fields = [
-        "namespace", "target_app", "chaos_duration",
+        "namespace", "chaos_duration",
         "agent_config", "traffic_config"
     ]
     
@@ -177,6 +178,15 @@ def validate_config():
     for field in required_fields:
         if field not in config:
             missing_fields.append(field)
+    
+    # Validate chaos config based on mode
+    chaos_config = config.get("chaos_config", {})
+    mode = chaos_config.get("mode")
+    
+    if mode == "chaos_only":
+        # For chaos_only mode, target_app is required
+        if "target_app" not in chaos_config:
+            missing_fields.append("chaos_config.target_app")
     
     if missing_fields:
         raise ValueError(f"Missing required configuration fields: {missing_fields}")
@@ -197,3 +207,21 @@ def validate_config():
         raise ValueError(f"Missing required configuration fields: {missing_fields}")
     
     return True 
+
+def extract_prometheus_latency(prometheus_metrics: Dict[str, Any], namespace: str) -> str:
+    """Extract average P95 latency value as simple number."""
+    if not prometheus_metrics or not prometheus_metrics.get("metrics", {}).get("istio_latency"):
+        return "unknown"
+    
+    istio_data = prometheus_metrics["metrics"]["istio_latency"].get("data", [])
+    if not istio_data:
+        return "unknown"
+    
+    # Filter for target namespace
+    target_services = [s for s in istio_data if s.get("namespace") == namespace]
+    if not target_services:
+        return "unknown"
+    
+    # Return average latency as a simple number
+    avg_latency = sum(s.get("p95_latency_ms", 0) for s in target_services) / len(target_services)
+    return f"{avg_latency:.1f}" 

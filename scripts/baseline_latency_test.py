@@ -22,8 +22,8 @@ except ImportError:
     pass  # If Locust not available, continue without it
 
 # Import required modules
-from nl_interface.anomalies.traffic_generator import LocustTrafficGenerator
-from nl_interface.anomalies.experiment_utils import smart_warmup_with_monitoring
+from nl_interface.experiment.traffic_generator import LocustTrafficGenerator
+from nl_interface.experiment.experiment_utils import smart_warmup_with_monitoring
 from nl_interface.shared.prometheus_client import PrometheusMetricsTool
 from mu_bench.deployers.manager import K8sDeploymentManager
 from kubernetes import client, config

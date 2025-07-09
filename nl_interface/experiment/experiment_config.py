@@ -1,36 +1,39 @@
 # Main test configuration
 EXPERIMENT_CONFIG = {
     # Target application settings
-    "namespace": "app-edge",
-    "target_app": "s2-cloud",
+    "namespace": "app-iot-gateway",
     "app_directory": "./APPS",
     
     # Test timing configuration - simplified phases with longer warmup
-    "pod_warmup_duration": 300,     # Extended warmup with smart monitoring for service stabilization  
+    "pod_warmup_duration": 100,     # Extended warmup with smart monitoring for service stabilization  
     "baseline_duration": 60,        # Record baseline metrics
     "chaos_warmup_duration": 60,    # Chaos impact + warmup before agent (record metrics during chaos)
     "recovery_duration": 60,        # Recovery after agent execution (record metrics)
     
-    # Chaos configuration
-    # Note: chaos_duration is calculated automatically based on phases
+    # Chaos configuration - Choose ONE testing mode:
     
-    # PREVIOUS CPU STRESS EXPERIMENT (commented out):
+    # # === MODE 1: DOCKER CONSTRAINTS ONLY ===
     # "chaos_config": {
-    #     "fault_type": "cpu_stress",
-    #     "intensity": "extreme",  # extreme, high, medium, low
+    #     "mode": "docker_only",              # Testing mode
+    #     "fault_type": "docker_constraints", # Docker-level resource limits
+    #     "intensity": "high",                # Used for logging/naming
+    #     "duration": "600s",                 # How long to keep constraints active
     #     "seed": 42,
-    #     "target_mode": "one",  # "one", "all", "fixed", "fixed-percent", "random-max-percent"
-    #     "target_value": "",    # Used with fixed/fixed-percent/random-max-percent modes
+    #     "node_name": "k3d-cec-emulator-agent-2",
+    #     "docker_cpu_limit": "0.3",          # CPU cores limit
+    #     "docker_memory_limit": "512m",      # Memory limit
     # },
     
-    # POD FAILURE EXPERIMENT:
+    # === MODE 2: CHAOS MESH ONLY ===
     "chaos_config": {
-        "fault_type": "pod_failure",
-        "intensity": "medium",   # Not directly used for pod failure but kept for consistency
-        "duration": "600s",      # Really big duration - pod stays down for 10 minutes
+        "mode": "chaos_only",               # Testing mode
+        "target_app": "cloud-analytics-engine-cloud",  # App to target for chaos
+        "fault_type": "cpu_stress",         # cpu_stress, memory_stress, pod_failure
+        "intensity": "extreme",                # low, medium, high, extreme
+        "duration": "600s",            
         "seed": 42,
-        "target_mode": "all",    # "one", "all", "fixed", "fixed-percent", "random-max-percent"
-        "target_value": "",      # Used with fixed/fixed-percent/random-max-percent modes
+        "target_mode": "one_pod", # one_pod, all_pods_app, all_pods_node
+        # "node_name": "k3d-cec-emulator-agent-2",  # Only needed for all_pods_node
     },
     
     # Agent configuration
@@ -42,11 +45,24 @@ EXPERIMENT_CONFIG = {
         "reasoning_in_context": False
     },
     
+    # Maps k3d node names to their proper resource limits
+    "node_resources": {
+        # Cloud nodes (4 CPU cores, 4GB memory)
+        "k3d-cec-emulator-agent-0": {"cpus": "4", "memory": "4g"},
+        "k3d-cec-emulator-agent-1": {"cpus": "4", "memory": "4g"},
+        
+        # Edge nodes (2 CPU cores, 2GB memory) 
+        "k3d-cec-emulator-agent-2": {"cpus": "2", "memory": "2g"},
+        "k3d-cec-emulator-agent-3": {"cpus": "2", "memory": "2g"},
+        "k3d-cec-emulator-agent-4": {"cpus": "2", "memory": "2g"},
+        "k3d-cec-emulator-agent-5": {"cpus": "2", "memory": "2g"}
+    },
+    
     # Traffic generation configuration
     "traffic_config": {
         "endpoints": [
-            "http://172.23.0.5:31115/s0-edge-site-1",
-            "http://172.23.0.5:31115/s0-edge-site-2"
+            "http://172.23.0.5:31115/iot-device-gateway-edge-site-1",
+            "http://172.23.0.5:31115/iot-device-gateway-edge-site-2"
         ],
         "requests_per_second": 5,  # 2 req/s per endpoint = 4 req/s total = 240 req per 60s phase (conservative)
         "request_timeout": 10,
