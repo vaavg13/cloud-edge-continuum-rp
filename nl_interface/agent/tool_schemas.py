@@ -327,6 +327,78 @@ def get_kubernetes_function_schemas() -> List[Dict[str, Any]]:
             }
         },
         {
+            "name": "kubectl_drain",
+            "description": "Drain a Kubernetes node by safely evicting all pods and marking the node as unschedulable",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "node_name": {
+                        "type": "string",
+                        "description": "Name of the node to drain"
+                    },
+                    "ignore_daemonsets": {
+                        "type": "boolean",
+                        "description": "Ignore DaemonSet-managed pods (usually required for successful drain)",
+                        "default": True
+                    },
+                    "delete_emptydir_data": {
+                        "type": "boolean",
+                        "description": "Continue even if there are pods using emptyDir volumes",
+                        "default": False
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Continue even if there are pods not managed by a controller",
+                        "default": False
+                    },
+                    "grace_period": {
+                        "type": "integer",
+                        "description": "Period of time in seconds given to each pod to terminate gracefully (default: 30)",
+                        "default": 30
+                    },
+                    "timeout": {
+                        "type": "string",
+                        "description": "The length of time to wait before giving up (e.g., '5m', '10m')",
+                        "default": "0s"
+                    },
+                    "disable_eviction": {
+                        "type": "boolean",
+                        "description": "Force drain to use delete instead of evict API",
+                        "default": False
+                    }
+                },
+                "required": ["node_name"]
+            }
+        },
+        {
+            "name": "kubectl_cordon",
+            "description": "Mark a Kubernetes node as unschedulable (prevents new pods from being scheduled)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "node_name": {
+                        "type": "string",
+                        "description": "Name of the node to cordon"
+                    }
+                },
+                "required": ["node_name"]
+            }
+        },
+        {
+            "name": "kubectl_uncordon",
+            "description": "Mark a Kubernetes node as schedulable (allows new pods to be scheduled)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "node_name": {
+                        "type": "string",
+                        "description": "Name of the node to uncordon"
+                    }
+                },
+                "required": ["node_name"]
+            }
+        },
+        {
             "name": "sleep_seconds",
             "description": "Wait for a specified number of seconds",
             "parameters": {

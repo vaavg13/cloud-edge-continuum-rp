@@ -7,6 +7,7 @@ Based on the template provided by the user, adapted for MCP Kubernetes operation
 import asyncio
 import json
 import time
+import random
 import os
 import openai
 from dotenv import load_dotenv
@@ -67,6 +68,53 @@ class KubernetesAgent:
         # Simple redundancy prevention - track recent function calls
         self.recent_calls = {}  # {function_signature: timestamp}
         self.call_freshness_seconds = 30  # Skip identical calls within 30 seconds
+
+    async def _retry_openai_call(self, api_call_func, max_retries: int = 5, base_delay: float = 1.0):
+        """
+        Wrapper for OpenAI API calls with exponential backoff retry logic for rate limits.
+        
+        Args:
+            api_call_func: Async function that makes the OpenAI API call
+            max_retries: Maximum number of retry attempts
+            base_delay: Base delay in seconds for exponential backoff
+            
+        Returns:
+            Response from OpenAI API
+            
+        Raises:
+            The original exception if all retries fail
+        """
+        last_exception = None
+        
+        for attempt in range(max_retries + 1):
+            try:
+                return await api_call_func()
+            
+            except Exception as e:
+                last_exception = e
+                error_str = str(e)
+                
+                # Check if this is a rate limit error
+                is_rate_limit = (
+                    "rate limit" in error_str.lower() or
+                    "rate_limit_exceeded" in error_str or
+                    "429" in error_str
+                )
+                
+                if not is_rate_limit or attempt == max_retries:
+                    # Not a rate limit error or final attempt - re-raise
+                    raise e
+                
+                # Calculate delay with exponential backoff and jitter
+                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                
+                logger.warning(f"Rate limit hit (attempt {attempt + 1}/{max_retries + 1}), retrying in {delay:.1f}s: {error_str}")
+                print(f"⏳ Rate limit reached, retrying in {delay:.1f}s... (attempt {attempt + 1}/{max_retries + 1})")
+                
+                await asyncio.sleep(delay)
+        
+        # This should never be reached, but just in case
+        raise last_exception
     
     async def initialize(self):
         """Initialize the Kubernetes Agent with all required clients."""
@@ -178,6 +226,69 @@ class KubernetesAgent:
         call_signature = f"{function_name}_{param_str}"
         self.recent_calls[call_signature] = time.time()
     
+    def convert_node_function_to_generic(self, function_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert node management function calls to kubectl_generic format.
+        
+        Args:
+            function_name: Name of the node function (kubectl_drain, kubectl_cordon, kubectl_uncordon)
+            args: Arguments for the node function
+            
+        Returns:
+            Dict with kubectl_generic compatible arguments
+        """
+        if function_name == "kubectl_drain":
+            node_name = args["node_name"]
+            
+            # Build flags for drain command
+            flags = {}
+            
+            # Add flags based on parameters
+            if args.get("ignore_daemonsets", True):
+                flags["ignore-daemonsets"] = True
+            
+            if args.get("delete_emptydir_data", False):
+                flags["delete-emptydir-data"] = True
+            
+            if args.get("force", False):
+                flags["force"] = True
+            
+            if args.get("disable_eviction", False):
+                flags["disable-eviction"] = True
+            
+            # Handle grace period (default is 30)
+            grace_period = args.get("grace_period", 30)
+            if grace_period != 30:  # Only add if different from default
+                flags["grace-period"] = grace_period
+            
+            # Handle timeout
+            timeout = args.get("timeout", "0s")
+            if timeout != "0s":  # Only add if different from default
+                flags["timeout"] = timeout
+            
+            return {
+                "command": "drain",
+                "name": node_name,
+                "flags": flags
+            }
+        
+        elif function_name == "kubectl_cordon":
+            node_name = args["node_name"]
+            return {
+                "command": "cordon",
+                "name": node_name
+            }
+        
+        elif function_name == "kubectl_uncordon":
+            node_name = args["node_name"]
+            return {
+                "command": "uncordon", 
+                "name": node_name
+            }
+        
+        else:
+            raise ValueError(f"Unknown node function: {function_name}")
+    
     async def ask_llm_step(self, context: List[str]) -> Dict[str, Any]:
         """
         Ask the LLM for the next step based on current context.
@@ -213,11 +324,13 @@ class KubernetesAgent:
         functions = get_kubernetes_function_schemas()
         
         try:
-            response = await self.openai_client.chat.completions.create(
-                model=self.config["openai_model"],
-                messages=messages,
-                functions=functions,
-                function_call="auto"
+            response = await self._retry_openai_call(
+                lambda: self.openai_client.chat.completions.create(
+                    model=self.config["openai_model"],
+                    messages=messages,
+                    functions=functions,
+                    function_call="auto"
+                )
             )
             
             message = response.choices[0].message
@@ -317,7 +430,7 @@ class KubernetesAgent:
                     if problem_location.get('nodes'):
                         nodes = problem_location['nodes']
                         node_str = ', '.join(nodes) if isinstance(nodes, list) else str(nodes)
-                        print(f"   🖥️  Nodes: {node_str}")
+                        print(f"   ��️  Nodes: {node_str}")
                     if problem_location.get('pods'):
                         pods = problem_location['pods']
                         pod_str = ', '.join(pods) if isinstance(pods, list) else str(pods)
@@ -429,6 +542,23 @@ class KubernetesAgent:
                     context.append(f"Result: {json.dumps(result, indent=2)}")
                     actions_taken.append(action)
                     print(f"✅ MCP call completed")
+                    
+                    # Record this function call to prevent redundancy
+                    self.record_function_call(func_name, args)
+                    
+                    # Show reasoning summary
+                    await self.display_reasoning_if_enabled(context, func_name, result)
+                
+                # Handle node management functions using kubectl_generic
+                elif func_name in ["kubectl_drain", "kubectl_cordon", "kubectl_uncordon"]:
+                    # Convert the node management function to kubectl_generic call
+                    generic_args = self.convert_node_function_to_generic(func_name, args)
+                    result = await self.call_mcp("kubectl_generic", generic_args)
+                    action = f"Executed {func_name}: {args}"
+                    context.append(action)
+                    context.append(f"Result: {json.dumps(result, indent=2)}")
+                    actions_taken.append(action)
+                    print(f"✅ Node management call completed")
                     
                     # Record this function call to prevent redundancy
                     self.record_function_call(func_name, args)
@@ -558,11 +688,13 @@ class KubernetesAgent:
                 {"role": "user", "content": reasoning_prompt}
             ]
             
-            response = await self.openai_client.chat.completions.create(
-                model=self.config["openai_model"],
-                messages=messages,
-                max_tokens=150,  # Keep it concise
-                temperature=0.1  # Keep it factual
+            response = await self._retry_openai_call(
+                lambda: self.openai_client.chat.completions.create(
+                    model=self.config["openai_model"],
+                    messages=messages,
+                    max_tokens=150,  # Keep it concise
+                    temperature=0.1  # Keep it factual
+                )
             )
             
             reasoning = response.choices[0].message.content.strip()

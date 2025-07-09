@@ -42,12 +42,14 @@ Correlate metrics, load, and service dependencies.
   * **Capacity Insufficient** → scale up / adjust HPA.
   * **Configuration Issue** → patch limits/requests.
   * **Infrastructure Bottleneck** → reschedule or investigate node.
+  * **Node Overload (multiple pods same node)** → drain/cordon node.
   * **Individual Pod Anomaly** → when one pod behaves drastically differently from siblings, consider pod-level remediation.
 If pattern yields a standard fix, proceed to Phase 4.
 
 ## Phase 3 – Deep Investigation (optional)
-Only enter if Phases 1-2 are inconclusive.
+Only enter if Phases 1-2 are inconclusive or initial fixes prove ineffective.
 - Infrastructure: `kubectl_get nodes`, `kubectl_describe node`.
+- **Pod Placement**: `kubectl_get pods -o wide` to understand which pods are on which nodes – critical for node-level decisions.
 - Kubernetes: `kubectl_list deployments`, `kubectl_get deployment -o json`.
 - Application: `kubectl_logs`, error rate trends.
 - Network: service mesh / connectivity checks.
@@ -80,7 +82,12 @@ The agent **must** end this phase by calling `generate_operational_summary` afte
 | High Memory **and** Pod Restarts | Memory leak / limit too low | Increase memory limits / restart pods |
 | Low CPU **but** High Latency | Network or external dependency | Investigate connectivity, DNS, upstream services |
 | Uneven Pod CPU Distribution | Load balancing issue | Check service selector / HPA distribution |
-| Node CPU Pressure + Multi-service impact | Infrastructure bottleneck | Reschedule pods / cordon node |
+| **Multiple pods on same node all stressed** | **Node-level resource exhaustion** | **Use `kubectl_get pods -o wide`, then `kubectl_drain <node>` to evacuate workloads** |
+| **Scaling increases pods but performance worsens** | **Node capacity exceeded** | **Check pod placement, drain overloaded node: `kubectl_drain node_name`** |
+| **All services on one node degraded simultaneously** | **Infrastructure/hardware issue** | **Cordon node: `kubectl_cordon <node>`, then drain: `kubectl_drain <node>`** |
+| Node CPU Pressure + Multi-service impact | Infrastructure bottleneck | Use `kubectl_get pods -o wide` to see pod distribution, then reschedule or investigate node health |
+| Scaling ineffective + persistent node stress | Node-level resource contention | Get pod placement with `-o wide`, consider node management operations (drain/cordon) |
+| All pods on one node showing stress | Poor pod distribution | Check placement with `-o wide`, consider anti-affinity or manual rescheduling |
 | Spike in Errors with stable resources | Application bug | Check logs, rollback / restart |
 | Single Pod Extreme Usage, Siblings Normal | Stuck/corrupted pod state | Consider individual pod remediation |
 
@@ -92,11 +99,14 @@ Operation is **COMPLETE** only if:
 
 # Available Functions (excerpt)
 - Planning: `create_action_plan`, `generate_operational_summary`
-- Kubernetes Ops: `kubectl_*` suite (get, list, patch, scale, etc.)
+- Kubernetes Ops: `kubectl_*` suite (get, list, patch, scale, drain, cordon, uncordon, etc.)
+- Pod Placement: Use `kubectl_get(resourceType="pods", namespace="...", output="wide")` to see which node each pod runs on
 - Monitoring: `prometheus_get_timeseries`, `prometheus_get_node_timeseries`, `prometheus_get_service_topology`
 - Utility: `sleep_seconds`
 
-# Minimal Example
+# Minimal Examples
+
+## Pod-Level Issue Example
 ```python
 # Phase 1 – confirm issue
 prometheus_get_timeseries(metric_type="latency", namespace="edge", duration="2m")
@@ -117,6 +127,41 @@ generate_operational_summary(
     problem_location={
         "deployments": ["web-service"],
         "resource_types": ["deployment"]
+    }
+)
+```
+
+## Node-Level Issue Example
+```python
+# Phase 1 – confirm issue
+prometheus_get_timeseries(metric_type="latency", namespace="app-iot-gateway", duration="2m")
+prometheus_get_timeseries(metric_type="cpu", namespace="app-iot-gateway", duration="2m")
+# Observation: Counter-intuitive pattern detected:
+#   - BEFORE: High CPU (70-80%), Low latency (2s) = healthy operation
+#   - NOW: Low CPU (15-20%), High latency (8s) = resource starvation
+
+# Phase 2 – investigate CPU throttling pattern
+prometheus_get_node_timeseries(metric_type="cpu", duration="2m")
+kubectl_get(resourceType="pods", namespace="app-iot-gateway", output="wide")
+# Observation: 4 pods all on k3d-cec-emulator-agent-2, all showing abnormally low CPU despite high latency
+# Pattern: CPU starvation/throttling (pods can't get CPU they need despite appearing "underutilized")
+
+# Phase 4 – drain resource-constrained node
+create_action_plan(objective="Relocate workloads from CPU-starved node", evidence="Multiple pods on agent-2 showing low CPU but high latency - suggests node-level resource constraints")
+kubectl_drain(node_name="k3d-cec-emulator-agent-2", ignore_daemonsets=True)
+sleep_seconds(duration=60)
+kubectl_get(resourceType="pods", namespace="app-iot-gateway", output="wide")  # pods moved to other nodes
+prometheus_get_timeseries(metric_type="latency", namespace="app-iot-gateway", duration="1m")  # improved
+
+generate_operational_summary(
+    objective="Resolve node-level CPU starvation",
+    actions_completed=["Drained k3d-cec-emulator-agent-2", "Relocated 4 pods to healthy nodes"],
+    results_achieved=["Latency restored (8s→2s)", "Pods now getting adequate CPU on healthy nodes"],
+    status="COMPLETED – node-level resource constraint resolved",
+    success=True,
+    problem_location={
+        "nodes": ["k3d-cec-emulator-agent-2"],
+        "resource_types": ["node"]
     }
 )
 ```
