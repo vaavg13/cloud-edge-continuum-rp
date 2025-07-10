@@ -386,12 +386,38 @@ class KubernetesAgent:
                 }
 
             elif function_name == "generate_operational_summary":
+                # Extract problem_location - handle both new array format and old dict format
+                problem_location_param = parameters.get("problem_location", [])
+                problem_location_list = []
+                
+                # If it's already a list (new format), use it directly
+                if isinstance(problem_location_param, list):
+                    problem_location_list = problem_location_param
+                # If it's a dict (old format), convert it
+                elif isinstance(problem_location_param, dict):
+                    # Convert old format to new format
+                    for resource_type in ["deployment", "pod", "node", "service"]:
+                        plural_key = f"{resource_type}s"
+                        if plural_key in problem_location_param:
+                            resources = problem_location_param[plural_key]
+                            if isinstance(resources, list):
+                                for name in resources:
+                                    problem_location_list.append({
+                                        "name": name,
+                                        "type": resource_type
+                                    })
+                            elif isinstance(resources, str):
+                                problem_location_list.append({
+                                    "name": resources,
+                                    "type": resource_type
+                                })
+                
                 summary = {
                     "objective": parameters.get("objective"),
                     "actions_completed": parameters.get("actions_completed", []),
                     "results_achieved": parameters.get("results_achieved", []),
                     "status": parameters.get("status"),
-                    "problem_location": parameters.get("problem_location", {}),
+                    "problem_location": problem_location_list,  # Now always a list
                     "success": parameters.get("success", False),
                     "timestamp": time.time(),
                     "plan_info": {
@@ -415,30 +441,28 @@ class KubernetesAgent:
                 success_text = "SUCCEEDED" if summary['success'] else "FAILED"
                 print(f"🏆 Resolution: {success_icon} {success_text}")
                 
-                # Display problem location details if provided
-                problem_location = summary.get('problem_location', {})
-                if problem_location:
+                # Display problem location details if provided (new format)
+                if problem_location_list:
                     print(f"\n📍 PROBLEM LOCATION:")
-                    if problem_location.get('deployments'):
-                        deployments = problem_location['deployments']
-                        deployment_str = ', '.join(deployments) if isinstance(deployments, list) else str(deployments)
-                        print(f"   🚀 Deployments: {deployment_str}")
-                    if problem_location.get('services'):
-                        services = problem_location['services']
-                        service_str = ', '.join(services) if isinstance(services, list) else str(services)
-                        print(f"   🔗 Services: {service_str}")
-                    if problem_location.get('nodes'):
-                        nodes = problem_location['nodes']
-                        node_str = ', '.join(nodes) if isinstance(nodes, list) else str(nodes)
-                        print(f"   🐳 Nodes: {node_str}")
-                    if problem_location.get('pods'):
-                        pods = problem_location['pods']
-                        pod_str = ', '.join(pods) if isinstance(pods, list) else str(pods)
-                        print(f"   🐳 Pods: {pod_str}")
-                    if problem_location.get('resource_types'):
-                        resource_types = problem_location['resource_types']
-                        resource_str = ', '.join(resource_types) if isinstance(resource_types, list) else str(resource_types)
-                        print(f"   📦 Resource Types: {resource_str}")
+                    # Group by type for display
+                    by_type = {}
+                    for item in problem_location_list:
+                        resource_type = item.get('type', 'unknown')
+                        if resource_type not in by_type:
+                            by_type[resource_type] = []
+                        by_type[resource_type].append(item.get('name', 'unknown'))
+                    
+                    # Display grouped by type
+                    type_emojis = {
+                        'deployment': '🚀',
+                        'service': '🔗',
+                        'node': '🖥️',
+                        'pod': '📦'
+                    }
+                    for resource_type, names in by_type.items():
+                        emoji = type_emojis.get(resource_type, '📦')
+                        names_str = ', '.join(names)
+                        print(f"   {emoji} {resource_type.capitalize()}s: {names_str}")
                 
                 print(f"\n✅ Actions Completed ({len(summary['actions_completed'])}):")
                 for i, action in enumerate(summary['actions_completed'], 1):

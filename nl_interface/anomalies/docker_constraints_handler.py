@@ -120,12 +120,9 @@ class DockerConstraintsHandler:
     def ensure_nodes_schedulable(self) -> bool:
         """Ensure all k3d nodes are schedulable by uncordoning any cordoned nodes."""
         try:
-            print(f"🔓 Ensuring all nodes are schedulable...")
-            
             # Get current node status
             node_status = self.get_kubernetes_node_status()
             if not node_status:
-                print(f"⚠️  Could not get node status - skipping schedulability check")
                 return False
             
             uncordon_count = 0
@@ -139,19 +136,17 @@ class DockerConstraintsHandler:
                 total_nodes += 1
                 
                 if not status['schedulable']:
-                    print(f"🔓 Uncordoning node {node_name}...")
                     uncordon_cmd = f"kubectl uncordon {node_name}"
                     result = subprocess.run(uncordon_cmd.split(), capture_output=True, text=True)
                     
                     if result.returncode == 0:
-                        print(f"   ✅ {node_name} is now schedulable")
                         uncordon_count += 1
                     else:
                         print(f"   ❌ Failed to uncordon {node_name}: {result.stderr}")
-                else:
-                    print(f"   ✓ {node_name} is already schedulable")
             
-            print(f"📊 Schedulability check: {uncordon_count} nodes uncordoned, {total_nodes} total agent nodes processed")
+            if uncordon_count > 0:
+                print(f"   ✅ Uncordoned {uncordon_count} nodes to ensure schedulability")
+            
             return True
             
         except Exception as e:
@@ -161,11 +156,8 @@ class DockerConstraintsHandler:
     def reset_all_node_docker_constraints(self) -> bool:
         """Reset Docker constraints for all k3d nodes to their proper resource specifications and ensure they are schedulable."""
         try:
-            print(f"🔄 Setting all k3d nodes to their proper resource specifications and ensuring schedulability...")
-            
             nodes = self.get_all_k3d_nodes()
             if not nodes:
-                print(f"⚠️  No k3d nodes found - skipping pre-run cleanup")
                 return True
             
             # First, ensure all nodes are schedulable (uncordon any cordoned nodes)
@@ -174,16 +166,15 @@ class DockerConstraintsHandler:
             # Get node resource specifications from config
             node_resources = self.config.get("node_resources", {})
             if not node_resources:
-                print(f"⚠️  No node resource specifications found in config - skipping resource setup")
                 return schedulable_success
             
             success_count = 0
+            updates_made = 0
             for node_name in nodes:
                 try:
                     # Get the proper resource specification for this node
                     target_resources = node_resources.get(node_name)
                     if not target_resources:
-                        print(f"   ⚠️  No resource spec found for {node_name} - skipping")
                         continue
                     
                     target_cpus = target_resources["cpus"]
@@ -199,31 +190,32 @@ class DockerConstraintsHandler:
                         needs_update = (current_cpus != target_cpus or current_memory != target_memory)
                         
                         if needs_update:
-                            print(f"🔧 Setting proper limits on {node_name}: CPU={current_cpus}→{target_cpus}, Memory={current_memory}→{target_memory}")
-                            
                             # Set to proper resource limits
                             update_cmd = f"docker update --cpus={target_cpus} --memory={target_memory} {node_name}"
                             result = subprocess.run(update_cmd.split(), capture_output=True, text=True)
                             
                             if result.returncode == 0:
-                                print(f"   ✅ {node_name} set to proper limits: CPU={target_cpus}, Memory={target_memory}")
                                 success_count += 1
+                                updates_made += 1
                             else:
                                 print(f"   ❌ Failed to set limits on {node_name}: {result.stderr}")
                         else:
-                            print(f"   ✓ {node_name} already has correct limits: CPU={target_cpus}, Memory={target_memory}")
                             success_count += 1
-                    else:
-                        print(f"   ⚠️  Could not check current resources for {node_name}")
                         
                 except Exception as e:
                     print(f"   ❌ Error processing {node_name}: {e}")
             
-            print(f"📊 Pre-run setup: {success_count}/{len([n for n in nodes if n in node_resources])} configured nodes processed successfully")
+            # Single summary line
+            total_nodes = len([n for n in nodes if n in node_resources])
+            if updates_made > 0:
+                print(f"   ✅ Reset {updates_made} nodes to proper resource limits ({success_count}/{total_nodes} successful)")
+            else:
+                print(f"   ✅ All {total_nodes} nodes already have proper resource limits")
+            
             return success_count > 0 and schedulable_success
             
         except Exception as e:
-            print(f"❌ Error in pre-run Docker resource setup: {e}")
+            print(f"❌ Error in Docker resource setup: {e}")
             return False
 
     def inject_docker_constraints_only(self, config: Dict[str, Any]) -> Dict[str, Any]:

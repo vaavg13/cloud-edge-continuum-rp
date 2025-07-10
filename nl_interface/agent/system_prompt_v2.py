@@ -143,10 +143,9 @@ generate_operational_summary(
     results_achieved=["Latency restored (8s→2.1s)", "Pod resource usage normalized"],
     status="COMPLETED – pod failure resolved",
     success=True,
-    problem_location={
-        "pods": ["edge-service-xyz"],
-        "resource_types": ["pod"]
-    }
+    problem_location=[
+        {"name": "edge-service-xyz", "type": "pod"}
+    ]
 )
 ```
 
@@ -178,10 +177,9 @@ generate_operational_summary(
     results_achieved=["Latency restored (8s→2s)", "Pods now getting adequate CPU on healthy nodes"],
     status="COMPLETED – node-level resource constraint resolved",
     success=True,
-    problem_location={
-        "nodes": ["k3d-cec-emulator-agent-2"],
-        "resource_types": ["node"]
-    }
+    problem_location=[
+        {"name": "k3d-cec-emulator-agent-2", "type": "node"}
+    ]
 )
 ```
 

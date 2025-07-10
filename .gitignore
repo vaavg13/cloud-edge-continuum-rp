@@ -10,6 +10,7 @@ EXPERIMENTS/
 EXPERIMENT/
 DATA/
 tex/
+DATASET_LOGS/
 
 # Cursor stuff
 .cursor/

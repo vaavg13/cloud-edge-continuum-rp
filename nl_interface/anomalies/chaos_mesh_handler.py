@@ -231,31 +231,27 @@ class ChaosMeshHandler:
         
         fault_type = config['fault_type']
         target_mode = config['target_mode']
-        target_app = config['target_app']  # Get target_app from chaos config
+        target_app = config.get('target_app')
         
-        print(f"🎯 Target app: {target_app}")
-        print(f"🎲 Target mode: {target_mode}")
-        
-        # Create chaos experiment record
-        experiment_record = {
-            "name": f"{fault_type}-{target_app}-{config['intensity']}",
-            "app": target_app,
-            "config": config,
-            "docker_only": False
-        }
-        
-        # Generate template based on target mode
+        print(f"🎯 Fault type: {fault_type} | Target mode: {target_mode}")
+
+        # Generate template first to get the canonical experiment name
         if target_mode in ["one_pod", "all_pods_app"]:
+            if not target_app:
+                raise ValueError("target_app is required for app-level chaos")
+            print(f"🎯 Target app: {target_app}")
             template = self.create_experiment_template(
                 fault_type=fault_type,
                 target_mode=target_mode,
-                app=experiment_record["app"],
+                app=target_app,
                 intensity=config["intensity"],
                 duration=config["duration"]
             )
         elif target_mode == "all_pods_node":
-            node_name = config["node_name"]
-            print(f"🎯 Node target: {node_name}")
+            node_name = config.get("node_name")
+            if not node_name:
+                raise ValueError("node_name is required for node-level chaos")
+            print(f"🎯 Target node: {node_name}")
             template = self.create_experiment_template(
                 fault_type=fault_type,
                 target_mode=target_mode,
@@ -265,7 +261,20 @@ class ChaosMeshHandler:
             )
         else:
             raise ValueError(f"Unknown target_mode: {target_mode}")
-        
+
+        # Get name from template's metadata
+        experiment_name = template["metadata"]["name"]
+        print(f"📖 Generated experiment name: {experiment_name}")
+
+        # Create chaos experiment record using the canonical name
+        experiment_record = {
+            "name": experiment_name,
+            "fault_type": fault_type,  # Add fault_type for cleanup
+            "app": target_app,  # Can be None for node-level chaos
+            "config": config,
+            "docker_only": False
+        }
+
         # Set experiment duration to 1 hour (will be cleaned up by stop_chaos)
         if template and "spec" in template:
             template["spec"]["duration"] = "3600s"
@@ -279,7 +288,7 @@ class ChaosMeshHandler:
             "intensity": config["intensity"]
         }
         
-        # Add target-specific fields
+        # Add target-specific fields for verification/logging
         if target_mode in ["one_pod", "all_pods_app"]:
             experiment_config["app"] = experiment_record["app"]
         elif target_mode == "all_pods_node":
