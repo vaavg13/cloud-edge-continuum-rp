@@ -3,8 +3,8 @@
 Reasoning prompts for the Kubernetes Agent.
 """
 
-# Template string with placeholders
-REASONING_SUMMARY_PROMPT = """Based on your recent action and its result, provide a brief reasoning summary.
+# Template string with placeholders for reflective reasoning
+REASONING_SUMMARY_PROMPT = """Based on your recent action and its result, provide a critical reflection and analysis.
 
 Recent context:
 {context_text}
@@ -12,12 +12,13 @@ Recent context:
 Last action: {last_function}
 Result: {last_result_preview}
 
-Provide a 2-3 sentence summary covering:
-1. What you learned from this action. Add important details in one sentence.
-2. Why this action was important for your objective  
-3. What you plan to do next
+Provide a reflective analysis covering:
+1. PATTERN RECOGNITION: What specific patterns do you observe in the data? Look for anomalies, correlations, or unexpected behaviors.
+2. EVIDENCE ASSESSMENT: What does this evidence tell you about the root cause? Be specific about metrics, resource usage, or failure indicators.
+3. CRITICAL EVALUATION: Does this result contradict or confirm your hypothesis? Are there red flags or concerning patterns?
+4. NEXT STEPS: Based on this evidence, what is the most logical next action? Should you investigate deeper or take immediate corrective action?
 
-Keep it concise and focused on operational reasoning."""
+Focus on actionable insights and avoid repeating obvious information. If you see resource exhaustion, pod failures, or performance degradation, explicitly call it out."""
 
 def get_reasoning_summary_prompt(context_text: str, last_function: str, last_result_preview: str) -> str:
     return REASONING_SUMMARY_PROMPT.format(

@@ -44,9 +44,9 @@ class KubernetesAgent:
         if "show_reasoning" not in self.config:
             self.config["show_reasoning"] = True
         
-        # New: optionally include reasoning summaries in context fed back to LLM
+        # New: include reasoning summaries in context fed back to LLM (now enabled by default)
         if "reasoning_in_context" not in self.config:
-            self.config["reasoning_in_context"] = False
+            self.config["reasoning_in_context"] = True
         
         # Load API key directly from environment
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -430,7 +430,7 @@ class KubernetesAgent:
                     if problem_location.get('nodes'):
                         nodes = problem_location['nodes']
                         node_str = ', '.join(nodes) if isinstance(nodes, list) else str(nodes)
-                        print(f"   ��️  Nodes: {node_str}")
+                        print(f"   🐳 Nodes: {node_str}")
                     if problem_location.get('pods'):
                         pods = problem_location['pods']
                         pod_str = ', '.join(pods) if isinstance(pods, list) else str(pods)
@@ -464,7 +464,7 @@ class KubernetesAgent:
             error_result = {"error": f"Planning function failed: {str(e)}"}
             return error_result
     
-    async def agent_loop(self, intent: str, snapshot: Dict[str, Any] = None) -> List[str]:
+    async def agent_loop(self, intent: str, snapshot: Dict[str, Any] = None) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
         """
         Main agent loop based on the user's template.
         
@@ -473,7 +473,7 @@ class KubernetesAgent:
             snapshot: Initial state information (optional)
             
         Returns:
-            List of actions taken during the loop
+            Tuple of (actions_taken, operational_summary)
         """
         if not self.is_initialized:
             await self.initialize()
@@ -491,158 +491,207 @@ class KubernetesAgent:
         print(f"   Max rounds: {self.config['max_rounds']}")
         print(f"   Context snapshot keys: {list(snapshot.keys()) if snapshot else 'None'}")
         
-        for round_num in range(self.config['max_rounds']):
-            print(f"\n🔄 Round {round_num + 1}/{self.config['max_rounds']}")
-            
-            llm_msg = await self.ask_llm_step(context)
-            
-            if llm_msg.get("error"):
-                print(f"❌ LLM Error: {llm_msg['error']}")
-                break
-            
-            if llm_msg.get("function_call"):
-                func_name = llm_msg["function_call"]["name"]
-                args = llm_msg["function_call"]["arguments"]
+        agent_success = False
+        agent_error = None
+        interrupted = False
+        final_summary = None
+        
+        try:
+            for round_num in range(self.config['max_rounds']):
+                print(f"\n🔄 Round {round_num + 1}/{self.config['max_rounds']}")
                 
-                # Check for redundant data collection calls (skip planning functions)
-                if func_name not in ["create_action_plan", "generate_operational_summary"]:
-                    skip_reason = self.is_recent_call(func_name, args)
-                    if skip_reason:
-                        print(f"⏭️  Skipping {func_name}: {skip_reason}")
-                        context.append(f"Skipped redundant {func_name} call: {skip_reason}")
-                        continue
+                llm_msg = await self.ask_llm_step(context)
                 
-                print(f"⚡ Executing: {func_name}")
-                if args:
-                    print(f"   Parameters: {json.dumps(args, indent=2)}")
+                if llm_msg.get("error"):
+                    print(f"❌ LLM Error: {llm_msg['error']}")
+                    break
                 
-                # Handle planning functions
-                if func_name in ["create_action_plan", "generate_operational_summary"]:
-                    result = await self.handle_planning_function(func_name, args)
-                    action = f"Executed {func_name}"
-                    context.append(action)
-                    context.append(f"Result: {json.dumps(result, indent=2)}")
-                    actions_taken.append(action)
-                    print(f"✅ Planning function completed")
-                                        
-                    # If this was an operational summary, the operation is complete
-                    if func_name == "generate_operational_summary" and result.get("operation_complete"):
-                        print(f"🏁 Operation completed with summary")
-                        break
-                
-                # Handle kubectl functions
-                elif func_name in [
-                    "kubectl_apply", "kubectl_get", "kubectl_delete", 
-                    "kubectl_list", "kubectl_scale", "kubectl_patch",
-                    "kubectl_describe", "kubectl_logs", "kubectl_rollout"
-                ]:
-                    result = await self.call_mcp(func_name, args)
-                    action = f"Executed {func_name}: {args}"
-                    context.append(action)
-                    context.append(f"Result: {json.dumps(result, indent=2)}")
-                    actions_taken.append(action)
-                    print(f"✅ MCP call completed")
+                if llm_msg.get("function_call"):
+                    func_name = llm_msg["function_call"]["name"]
+                    args = llm_msg["function_call"]["arguments"]
                     
-                    # Record this function call to prevent redundancy
-                    self.record_function_call(func_name, args)
+                    # Check for redundant data collection calls (skip planning functions)
+                    if func_name not in ["create_action_plan", "generate_operational_summary"]:
+                        skip_reason = self.is_recent_call(func_name, args)
+                        if skip_reason:
+                            print(f"⏭️  Skipping {func_name}: {skip_reason}")
+                            context.append(f"Skipped redundant {func_name} call: {skip_reason}")
+                            continue
                     
-                    # Show reasoning summary
-                    await self.display_reasoning_if_enabled(context, func_name, result)
-                
-                # Handle node management functions using kubectl_generic
-                elif func_name in ["kubectl_drain", "kubectl_cordon", "kubectl_uncordon"]:
-                    # Convert the node management function to kubectl_generic call
-                    generic_args = self.convert_node_function_to_generic(func_name, args)
-                    result = await self.call_mcp("kubectl_generic", generic_args)
-                    action = f"Executed {func_name}: {args}"
-                    context.append(action)
-                    context.append(f"Result: {json.dumps(result, indent=2)}")
-                    actions_taken.append(action)
-                    print(f"✅ Node management call completed")
+                    print(f"⚡ Executing: {func_name}")
+                    if args:
+                        print(f"   Parameters: {json.dumps(args, indent=2)}")
                     
-                    # Record this function call to prevent redundancy
-                    self.record_function_call(func_name, args)
+                    result = None
+                    tool_error = None
                     
-                    # Show reasoning summary
-                    await self.display_reasoning_if_enabled(context, func_name, result)
-                
-                # Handle prometheus functions (simplified)
-                elif func_name in [
-                    "prometheus_get_timeseries",
-                    "prometheus_get_node_timeseries",
-                    "prometheus_get_service_topology"
-                ]:
-                    result = await self.call_prometheus_function(func_name, args)
-                    action = f"Executed {func_name}: {args}"
-                    context.append(action)
-                    context.append(f"Result: {json.dumps(result, indent=2)}")
-                    actions_taken.append(action)
-                    print(f"✅ Prometheus call completed")
+                    # Handle planning functions
+                    if func_name in ["create_action_plan", "generate_operational_summary"]:
+                        result = await self.handle_planning_function(func_name, args)
+                        action = f"Executed {func_name}"
+                        context.append(action)
+                        context.append(f"Result: {json.dumps(result, indent=2)}")
+                        actions_taken.append({
+                            "type": "planning",
+                            "function": func_name,
+                            "parameters": args
+                        })
+                        print(f"✅ Planning function completed")
+                        
+                        # Capture final summary for logging
+                        if func_name == "generate_operational_summary":
+                            final_summary = result
+                            agent_success = result.get("summary", {}).get("success", result.get("success", False))
+                        
+                        # ALWAYS exit after operational summary - no conditions needed
+                        if func_name == "generate_operational_summary":
+                            print(f"🏁 Operation completed with summary - agent exiting")
+                            break
                     
-                    # Record this function call to prevent redundancy
-                    self.record_function_call(func_name, args)
+                    # Handle kubectl functions
+                    elif func_name in [
+                        "kubectl_apply", "kubectl_get", "kubectl_delete", 
+                        "kubectl_list", "kubectl_scale", "kubectl_patch",
+                        "kubectl_describe", "kubectl_logs", "kubectl_rollout"
+                    ]:
+                        result = await self.call_mcp(func_name, args)
+                        action = f"Executed {func_name}: {args}"
+                        context.append(action)
+                        context.append(f"Result: {json.dumps(result, indent=2)}")
+                        actions_taken.append({
+                            "type": "mcp_call",
+                            "function": func_name,
+                            "parameters": args
+                        })
+                        print(f"✅ MCP call completed")
+                        
+                        # Record this function call to prevent redundancy
+                        self.record_function_call(func_name, args)
+                        
+                        # Show reasoning summary
+                        await self.display_reasoning_if_enabled(context, func_name, result)
                     
-                    # Show reasoning summary
-                    await self.display_reasoning_if_enabled(context, func_name, result)
-                
-                elif func_name == "sleep_seconds":
-                    duration = args["duration"]
-                    print(f"💤 Sleeping for {duration} seconds...")
-                    await asyncio.sleep(duration)
-                    action = f"Slept {duration} seconds"
-                    context.append(action)
-                    actions_taken.append(action)
-                    print(f"✅ Sleep completed")
+                    # Handle node management functions using kubectl_generic
+                    elif func_name in ["kubectl_drain", "kubectl_cordon", "kubectl_uncordon"]:
+                        # Convert the node management function to kubectl_generic call
+                        generic_args = self.convert_node_function_to_generic(func_name, args)
+                        result = await self.call_mcp("kubectl_generic", generic_args)
+                        action = f"Executed {func_name}: {args}"
+                        context.append(action)
+                        context.append(f"Result: {json.dumps(result, indent=2)}")
+                        actions_taken.append({
+                            "type": "mcp_call",
+                            "function": func_name,
+                            "parameters": args
+                        })
+                        print(f"✅ Node management call completed")
+                        
+                        # Record this function call to prevent redundancy
+                        self.record_function_call(func_name, args)
+                        
+                        # Show reasoning summary
+                        await self.display_reasoning_if_enabled(context, func_name, result)
                     
-                    # Record this function call to prevent redundancy
-                    self.record_function_call(func_name, args)
+                    # Handle prometheus functions (simplified)
+                    elif func_name in [
+                        "prometheus_get_timeseries",
+                        "prometheus_get_node_timeseries",
+                        "prometheus_get_service_topology"
+                    ]:
+                        result = await self.call_prometheus_function(func_name, args)
+                        action = f"Executed {func_name}: {args}"
+                        context.append(action)
+                        context.append(f"Result: {json.dumps(result, indent=2)}")
+                        actions_taken.append({
+                            "type": "prometheus_call",
+                            "function": func_name,
+                            "parameters": args
+                        })
+                        print(f"✅ Prometheus call completed")
+                        
+                        # Record this function call to prevent redundancy
+                        self.record_function_call(func_name, args)
+                        
+                        # Show reasoning summary
+                        await self.display_reasoning_if_enabled(context, func_name, result)
                     
-                    # Show reasoning summary
-                    result = {"duration": duration, "status": "completed"}
-                    await self.display_reasoning_if_enabled(context, func_name, result)
+                    elif func_name == "sleep_seconds":
+                        duration = args["duration"]
+                        print(f"💤 Sleeping for {duration} seconds...")
+                        await asyncio.sleep(duration)
+                        action = f"Slept {duration} seconds"
+                        context.append(action)
+                        actions_taken.append({
+                            "type": "sleep",
+                            "duration": duration
+                        })
+                        print(f"✅ Sleep completed")
+                        
+                        # Record this function call to prevent redundancy
+                        self.record_function_call(func_name, args)
+                        
+                        # Show reasoning summary
+                        result = {"duration": duration, "status": "completed"}
+                        await self.display_reasoning_if_enabled(context, func_name, result)
+                    
+                    else:
+                        print(f"⚠️ Unknown function: {func_name}")
+                        result = {"error": f"Unknown function: {func_name}"}
+                        tool_error = f"Unknown function: {func_name}"
                 
                 else:
-                    print(f"⚠️ Unknown function: {func_name}")
+                    completion_msg = llm_msg.get('content', '').strip()
+                    if completion_msg:
+                        print(f"💭 Agent says: {completion_msg}")
+                    
+                    # Check if this looks like a completion message or if we should continue
+                    # Agent should only stop if it explicitly indicates completion
+                    completion_indicators = [
+                        "operation complete", "objective achieved", "task completed",
+                        "summary provided", "mission accomplished", "finished successfully"
+                    ]
+                    
+                    is_completion = any(indicator in completion_msg.lower() for indicator in completion_indicators)
+                    
+                    # If this looks like completion but no summary was generated, warn and continue
+                    if is_completion:
+                        # Check if we had a summary in recent actions
+                        recent_summaries = [
+                            action for action in actions_taken 
+                            if isinstance(action, dict) and action.get("function") == "generate_operational_summary"
+                        ]
+                        if not recent_summaries:
+                            print(f"⚠️ Agent indicated completion but no operational summary provided. Requesting summary...")
+                            context.append(f"SYSTEM: Agent indicated completion with message: '{completion_msg}' but no operational summary was generated. You must provide a generate_operational_summary before completion.")
+                            continue
+                        else:
+                            print(f"🏁 Agent completed with operational summary")
+                            break
+                    else:
+                        # Agent provided content but didn't indicate completion - this might be premature
+                        print(f"⚠️ Agent provided content without function call or completion indicator")
+                        print(f"   Consider whether objective is truly complete or if more actions are needed")
+                        
+                        # Add guidance to context about completion requirements
+                        context.append(f"Agent provided message: '{completion_msg}'. If objective is complete, use generate_operational_summary. If not complete, continue with planned actions.")
+                        
+                        # Only break if we're at the last round, otherwise continue
+                        if round_num == self.config['max_rounds'] - 1:
+                            print(f"🚨 Maximum rounds reached without proper completion. Requesting emergency summary...")
+                            context.append("SYSTEM: Maximum rounds reached. You MUST generate an operational summary now using generate_operational_summary function.")
+                        else:
+                            continue
             
-            else:
-                completion_msg = llm_msg.get('content', '').strip()
-                if completion_msg:
-                    print(f"💭 Agent says: {completion_msg}")
-                
-                # Check if this looks like a completion message or if we should continue
-                # Agent should only stop if it explicitly indicates completion
-                completion_indicators = [
-                    "operation complete", "objective achieved", "task completed",
-                    "summary provided", "mission accomplished", "finished successfully"
-                ]
-                
-                is_completion = any(indicator in completion_msg.lower() for indicator in completion_indicators)
-                
-                # If this looks like completion but no summary was generated, warn and continue
-                if is_completion:
-                    # Check if we had a summary in recent actions
-                    recent_summaries = [action for action in actions_taken[-3:] if "generate_operational_summary" in action]
-                    if not recent_summaries:
-                        print(f"⚠️ Agent indicated completion but no operational summary provided. Requesting summary...")
-                        context.append(f"SYSTEM: Agent indicated completion with message: '{completion_msg}' but no operational summary was generated. You must provide a generate_operational_summary before completion.")
-                        continue
-                    else:
-                        print(f"🏁 Agent completed with operational summary")
-                        break
-                else:
-                    # Agent provided content but didn't indicate completion - this might be premature
-                    print(f"⚠️ Agent provided content without function call or completion indicator")
-                    print(f"   Consider whether objective is truly complete or if more actions are needed")
-                    
-                    # Add guidance to context about completion requirements
-                    context.append(f"Agent provided message: '{completion_msg}'. If objective is complete, use generate_operational_summary. If not complete, continue with planned actions.")
-                    
-                    # Only break if we're at the last round, otherwise continue
-                    if round_num == self.config['max_rounds'] - 1:
-                        print(f"🚨 Maximum rounds reached without proper completion. Requesting emergency summary...")
-                        context.append("SYSTEM: Maximum rounds reached. You MUST generate an operational summary now using generate_operational_summary function.")
-                    else:
-                        continue
+            agent_success = True  # If we got here without exception, agent completed normally
+            
+        except KeyboardInterrupt:
+            interrupted = True
+            agent_error = "Agent execution interrupted by user"
+            print(f"\n🛑 Agent execution interrupted by user")
+        except Exception as e:
+            agent_error = str(e)
+            print(f"\n❌ Agent execution failed: {e}")
+            logger.exception("Agent execution error")
         
         print(f"\n🎯 AGENT FINISHED")
         print(f"   Actions taken: {len(actions_taken)}")
@@ -650,13 +699,16 @@ class KubernetesAgent:
             print(f"   Final plan status: {self.current_plan.get('status', 'unknown')}")
         
         # Check if operation completed properly with summary
-        summary_actions = [action for action in actions_taken if "generate_operational_summary" in action]
+        summary_actions = [
+            action for action in actions_taken 
+            if isinstance(action, dict) and action.get("function") == "generate_operational_summary"
+        ]
         if summary_actions:
             print(f"   ✅ Operation completed with structured summary")
         else:
             print(f"   ⚠️ Operation finished without structured summary")
             
-        return actions_taken
+        return actions_taken, final_summary
 
     async def get_reasoning_summary(self, context: List[str], last_function: str, last_result: Dict[str, Any]) -> str:
         """
@@ -692,7 +744,7 @@ class KubernetesAgent:
                 lambda: self.openai_client.chat.completions.create(
                     model=self.config["openai_model"],
                     messages=messages,
-                    max_tokens=150,  # Keep it concise
+                    max_tokens=300,  # Increased for detailed reflective analysis
                     temperature=0.1  # Keep it factual
                 )
             )
@@ -705,17 +757,18 @@ class KubernetesAgent:
             return f"Unable to generate reasoning summary: {str(e)}"
 
     async def display_reasoning_if_enabled(self, context: List[str], function_name: str, result: Dict[str, Any]):
-        """Display reasoning summary if enabled in config."""
+        """Display reasoning summary and add to context for reflection."""
         if not self.config.get("show_reasoning", True):
             return
             
         try:
             reasoning = await self.get_reasoning_summary(context, function_name, result)
-            print(f"\n💡 REASONING: {reasoning}")
+            print(f"\n🧠 CRITICAL ANALYSIS: {reasoning}")
 
-            # Optionally feed reasoning back into context for subsequent LLM calls
-            if self.config.get("reasoning_in_context", False):
-                context.append(f"REASONING: {reasoning}")
+            # Always feed reasoning back into context when reasoning is enabled - this is now the default
+            if self.config.get("reasoning_in_context", True):
+                context.append(f"CRITICAL_ANALYSIS: {reasoning}")
+                print(f"   📝 Added reasoning to context for next LLM call")
         except Exception as e:
             logger.error(f"Error displaying reasoning: {e}")
 

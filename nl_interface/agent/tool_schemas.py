@@ -501,35 +501,23 @@ def get_kubernetes_function_schemas() -> List[Dict[str, Any]]:
                         "description": "Status of the operation"
                     },
                     "problem_location": {
-                        "type": "object",
-                        "description": "Details about where the problem occurred",
-                        "properties": {
-                            "deployments": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Names of the deployments affected by the problem"
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "Name of the resource where the problem occurred"
+                                },
+                                "type": {
+                                    "type": "string",
+                                    "description": "Type of Kubernetes resource",
+                                    "enum": ["deployment", "pod", "node", "service"]
+                                }
                             },
-                            "services": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Names of the services affected by the problem"
-                            },
-                            "nodes": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Names of the nodes where the problem occurred"
-                            },
-                            "pods": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Names of specific pods affected by the problem"
-                            },
-                            "resource_types": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "description": "Types of Kubernetes resources affected (deployment, pod, service, node, etc.)"
-                            }
-                        }
+                            "required": ["name", "type"]
+                        },
+                        "description": "List of resources where problems occurred. If empty, indicates no fault was detected."
                     },
                     "success": {
                         "type": "boolean",
