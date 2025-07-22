@@ -25,18 +25,17 @@ except ImportError:
 
 # Import configuration and test modules
 from nl_interface.experiment.experiment_utils import (
-    get_experiment_config, 
-    get_alert_config, 
-    get_logging_config,
     validate_config,
     deploy_fresh_app_sync,
     wait_for_pods_ready_sync
 )
 from nl_interface.experiment.chaos_mitigation_experiment import ChaosAndMitigationExperiment
+from nl_interface.experiment.configs.experiment_config import EXPERIMENT_CONFIG, ALERT_CONFIG, LOGGING_CONFIG
+
 
 def setup_logging():
     """Setup logging configuration."""
-    log_config = get_logging_config()
+    log_config = LOGGING_CONFIG.copy()
     
     # Configure basic logging
     logging.basicConfig(
@@ -69,21 +68,20 @@ def check_prerequisites():
 
 def print_experiment_info():
     """Print information about the experiment to be run."""
-    config = get_experiment_config()
+    config = EXPERIMENT_CONFIG.copy()
     
     print("CHAOS EXPERIMENT CONFIGURATION")
     print("=" * 40)
     print(f"Namespace: {config['namespace']}")
-    print(f"Chaos: {config['chaos_config']['fault_type']} ({config['chaos_config']['intensity']}, {config['chaos_duration']})")
-    print(f"Duration: ~{config['monitoring_duration']//60} minutes")
+    print(f"Chaos: {config['chaos_config']['fault_type']} ({config['chaos_config']['intensity']})")
     print(f"Agent: {config['agent_config']['openai_model']} (max {config['agent_config']['max_rounds']} rounds)")
     print("=" * 40)
 
 async def run_experiment(deployment_success=True, namespace=""):
     """Run the complete chaos injection and mitigation experiment."""
     # Get configurations
-    experiment_config = get_experiment_config()
-    alert_config = get_alert_config()
+    experiment_config = EXPERIMENT_CONFIG.copy()
+    alert_config = ALERT_CONFIG.copy()
     
     # Create test instance
     test = ChaosAndMitigationExperiment(experiment_config, alert_config)
@@ -147,9 +145,9 @@ def main():
         print_experiment_info()
         
         # Ask for confirmation
-        config = get_experiment_config()
+        config = EXPERIMENT_CONFIG.copy()
         print(f"\nThis experiment will deploy fresh apps, inject chaos, generate traffic,")
-        print(f"and run AI agent mitigation for ~{config['monitoring_duration']//60} minutes.")
+        print(f"and run AI agent mitigation.")
         
         try:
             confirmation = input(f"\nProceed? (y/N): ").strip().lower()

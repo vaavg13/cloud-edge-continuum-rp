@@ -10,6 +10,12 @@ import sys
 import os
 from pathlib import Path
 
+# --- Configuration ---
+# Set the starting experiment number (1-indexed). 
+# To run all experiments, set this to 1.
+# To resume from a specific experiment, set it to that number (e.g., 15).
+START_AT_EXPERIMENT = 5
+
 # Add project root to path for imports
 project_root = Path(__file__).parent
 sys.path.append(str(project_root))
@@ -24,14 +30,11 @@ except ImportError:
 from nl_interface.experiment.batch_chaos_experiment import BatchChaosExperiment
 from nl_interface.experiment.batch_config import BATCH_CONFIG, BATCH_ALERT_CONFIG
 from nl_interface.experiment.chaos_batch_generator import ChaosBatchGenerator, DEFAULT_CHAOS_COUNT_PER_TYPE
-from nl_interface.experiment.experiment_utils import (
-    get_logging_config,
-    validate_config
-)
+from nl_interface.experiment.batch_config import LOGGING_CONFIG
 
 def setup_logging():
     """Setup logging configuration."""
-    log_config = get_logging_config()
+    log_config = LOGGING_CONFIG.copy()
     
     # Configure basic logging
     logging.basicConfig(
@@ -65,6 +68,8 @@ async def main():
     
     # Setup logging
     setup_logging()
+
+    start_at_experiment = START_AT_EXPERIMENT
     
     # Configuration from BATCH_CONFIG
     batch_settings = BATCH_CONFIG.get("batch_settings", {})
@@ -77,8 +82,28 @@ async def main():
     # Create batch configuration
     batch_config = create_batch_config(experiment_count_per_type, random_seed)
     
-    print(f"Generated {len(batch_config['chaos_configurations'])} chaos experiments:")
-    for i, config in enumerate(batch_config['chaos_configurations'], 1):
+    # --- Slicing for Resuming ---
+    all_chaos_configs = batch_config.get("chaos_configurations", [])
+    total_experiments = len(all_chaos_configs)
+    
+    print(f"Generated {total_experiments} chaos experiments in total.")
+
+    if start_at_experiment > 1:
+        start_index = start_at_experiment - 1
+        if start_index < total_experiments:
+            print(f"▶️ Resuming from experiment {start_at_experiment}...")
+            batch_config["chaos_configurations"] = all_chaos_configs[start_index:]
+        else:
+            print(f"⚠️ Start number {start_at_experiment} is beyond the total number of experiments ({total_experiments}). Nothing to run.")
+            batch_config["chaos_configurations"] = []
+    
+    experiments_to_run = batch_config.get("chaos_configurations", [])
+    if not experiments_to_run:
+        print("No experiments to run. Exiting.")
+        return 0
+        
+    print(f"Executing {len(experiments_to_run)} experiments:")
+    for i, config in enumerate(experiments_to_run, start_at_experiment):
         print(f"  {i:2d}. {config['mode']} - {config['fault_type']} ({config.get('intensity', 'default')})")
     
     # Create batch experiment with dataset logging

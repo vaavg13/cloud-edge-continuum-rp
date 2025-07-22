@@ -11,6 +11,7 @@ EXPERIMENT/
 DATA/
 tex/
 DATASET_LOGS/
+FIGURES/
 
 # Cursor stuff
 .cursor/

@@ -21,10 +21,10 @@ INTENSITY_PARAMS = {
         "extreme": {"workers": 16, "load": 100}
     },
     "memory_stress": {
-        "low": {"workers": 1, "size": "128MB"},
-        "medium": {"workers": 1, "size": "512MB"},
-        "high": {"workers": 2, "size": "1GB"},
-        "extreme": {"workers": 4, "size": "2GB"}
+        "low": {"workers": 1, "size": "256MB", "time": "10s"},
+        "medium": {"workers": 2, "size": "512MB", "time": "10s"},
+        "high": {"workers": 4, "size": "1GB", "time": "10s"},
+        "extreme": {"workers": 8, "size": "100%"}
     }
 }
 

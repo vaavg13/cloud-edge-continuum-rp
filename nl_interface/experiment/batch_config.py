@@ -1,6 +1,6 @@
 BATCH_CONFIG = {
     # Target application settings
-    "namespace": "app-smart-manufacturing",
+    "namespace": "app-smart-city",
     "app_directory": "./APPS",
     
     # Test timing configuration - simplified phases with longer warmup
@@ -40,26 +40,30 @@ BATCH_CONFIG = {
     
     # Available deployment/app names for chaos targeting
     "available_deployments": [
-        "sensor-data-ingestion-edge-site-1",
-        "sensor-data-ingestion-edge-site-2",
-        "edge-data-preprocessing-edge-site-1",
-        "edge-data-preprocessing-edge-site-2",
-        "real-time-anomaly-detection-edge-site-1",
-        "real-time-anomaly-detection-edge-site-2",
-        "local-control-actuation-edge-site-1",
-        "local-control-actuation-edge-site-2",
-        "predictive-maintenance-analytics-cloud",
-        "production-optimization-engine-cloud",
-        "inventory-supply-chain-mgmt-cloud",
-        "centralized-data-lake-cloud",
-        "reporting-dashboarding-cloud"
+        "traffic-sensor-ingest-edge-site-1",
+        "traffic-sensor-ingest-edge-site-2",
+        "edge-traffic-analytics-edge-site-1",
+        "edge-traffic-analytics-edge-site-2",
+        "signal-control-logic-edge-site-1",
+        "signal-control-logic-edge-site-2",
+        "incident-detection-edge-edge-site-1",
+        "incident-detection-edge-edge-site-2",
+        "vehicle-to-infrastructure-edge-site-1",
+        "vehicle-to-infrastructure-edge-site-2",
+        "cloud-data-ingestion-cloud",
+        "central-traffic-optimization-cloud",
+        "route-guidance-system-cloud",
+        "emergency-mgmt-dispatch-cloud",
+        "public-facing-apps-backend-cloud",
+        "historical-traffic-data-store-cloud",
+        "reporting-planning-tools-cloud"
     ],
     
     # Traffic generation configuration
     "traffic_config": {
         "endpoints": [
-            "http://172.23.0.5:31119/sensor-data-ingestion-edge-site-1",
-            "http://172.23.0.5:31119/sensor-data-ingestion-edge-site-2"
+            "http://172.23.0.5:31117/traffic-sensor-ingest-edge-site-1",
+            "http://172.23.0.5:31117/traffic-sensor-ingest-edge-site-2"
         ],
         "requests_per_second": 5,  # 2 req/s per endpoint = 4 req/s total = 240 req per 60s phase (conservative)
         "request_timeout": 10,
@@ -87,4 +91,14 @@ BATCH_ALERT_CONFIG = {
         "current_latency_p95",
         "current_success_rate"
     ]
-} 
+}
+
+# Logging configuration
+LOGGING_CONFIG = {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "suppress_libs": [
+        "httpx",
+        "httpcore"
+    ]
+}
