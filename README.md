@@ -2,20 +2,23 @@
 
 ## Project Overview
 
-This research project focuses on creating comprehensive datasets that capture CPU usage patterns and microservice migrations in volatile cloud-edge environments. Using MuBench for workload emulation with real-life trace patterns (e.g., Alibaba traces), we simulate realistic scenarios including node failures, throttling, and dynamic user requests with temporal patterns. The primary goal is to collect and analyze CPU utilization across microservices and nodes, track migration events, and understand system behavior under various conditions.
+This research project focuses on creating comprehensive datasets that capture CPU usage patterns and microservice migrations in volatile cloud-edge environments. Using MuBench for workload emulation with configurable service topologies, we simulate realistic scenarios including node failures, throttling, and dynamic user requests. The primary goal is to collect and analyze CPU utilization across microservices and nodes, track migration events, and understand system behavior under various conditions in cloud-edge continuum settings.
 
 ## Repository Structure
 
-- `/APPS/` - This is where generated or active applications are stored, each with `generators/` and `yamls/` subfolders. Each app is described by `workmodel.json` and `k8parameters.json`.
-- `/infrastructure/` - Kubernetes cluster setup, node management, add-ons, and monitoring (e.g., dashboards, manifests).
-- `/mu_bench/` - Main MuBench workload emulation framework, including CLI, deployers, generators, request generators, service cell logic, templates, test scripts, and utilities.
-- `/scripts/` - Various utility or alternative execution scripts.
+- `/APPS/` - Pre-configured application examples with `workmodel.json` and `k8parameters.json` files, plus generated Kubernetes YAMLs
+- `/infrastructure/` - K3d Kubernetes cluster setup, node management, monitoring stack (Prometheus, Grafana, Kiali)
+- `/mu_bench/` - Python package for workload emulation, deployment automation, and experiment management
+  - `/mu_bench/mu_bench/` - Core package modules (deployers, generators, metrics, visualization)
+  - `pyproject.toml` - Package configuration and dependencies
+- `/scripts/` - Jupyter notebooks and Python scripts for experiment execution and visualization
+- `/service_cell/` - Microservice container implementation with workload simulation capabilities
 
 ## Key Concepts and Architecture
 
-This project emulates geo-distributed microservice (MS) applications on a single k3d Kubernetes cluster, with nodes labeled as either cloud or edge zones (e.g., cloud, edge-site-1, edge-site-2). The emulation is driven by a `workmodel.json` file, which defines each MS instance (such as s0, s1, etc.) and their deployment configuration, including node affinity to control placement on specific zones. All external requests enter through s0, which then randomly calls other services, forming a dynamic call graph that mimics real-world MS interactions.
+This project emulates geo-distributed microservice applications on a single k3d Kubernetes cluster, with nodes labeled as cloud or edge zones (e.g., `cloud`, `edge-site-1`, `edge-site-2`). The emulation is driven by a `workmodel.json` file that defines service instances, their computational workloads, external service dependencies, and deployment configurations with node affinity for topology-aware placement.
 
-The project is being refactored for modularity and automation, with a focus on using a standardized Python library structure and minimizing manual command sequences. Node affinity and topology-aware deployment are being integrated directly into the deployment logic, and Istio is planned for ingress and advanced routing. The goal is to enable realistic experimentation with cloud-edge placement, user location-aware routing, and system behavior under various scenarios, all while keeping the internal MS logic unchanged for now.
+External requests enter through entry services (like `iot-device-gateway`) and create dynamic call graphs by randomly invoking dependent services, mimicking real-world microservice interactions. The system supports workload simulation through configurable CPU and memory stress patterns, enabling realistic performance studies in cloud-edge environments.
 
 ## Prerequisites
 
@@ -23,200 +26,298 @@ The project is being refactored for modularity and automation, with a focus on u
 - Kubernetes CLI (kubectl)
 - K3d
 - Python 3.8+
+- jq, yq (installed automatically by setup scripts)
 
 ## Installation
 
-### Automated Installation
+### Step 1: Deploy K3d Cluster
 
-The easiest way to set up the environment is using the clean_install script:
+First, set up the Kubernetes infrastructure:
 
 ```bash
 # Clone the repository
 git clone https://github.com/your-username/cloud-edge-continuum-rp.git
 cd cloud-edge-continuum-rp
 
-# Run the clean installation script
-./scripts/clean_install.sh
+# Set up the infrastructure (K3d cluster + monitoring)
+./infrastructure/setup.sh
 ```
 
 This script will:
 
-1. Clean any existing environment
-2. Set up the infrastructure (K3d Kubernetes cluster)
-3. Install and configure MuBench
+1. Install required dependencies (K3d, yq, jq)
+2. Create a K3d Kubernetes cluster with configurable nodes
+3. Apply resource limits and zone labels to nodes
+4. Optionally install monitoring stack (Prometheus, Grafana, Kiali)
 
-### Manual Installation
+### Step 2: Set Up Python Virtual Environment and Install MuBench Package
 
-If you prefer to install components separately:
+Create a virtual environment and install the MuBench package in development mode:
 
-1. Set up infrastructure:
+```bash
+# Create virtual environment in the project root
+python -m venv .venv
 
-    ```bash
-    ./infrastructure/setup.sh
-    ```
+# Activate virtual environment
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-2. Install MuBench:
+# Install the mu_bench package in editable mode
+pip install -e mu_bench/
+```
 
-    ```bash
-    # (see mu_bench/ for details)
-    ```
+**Note:** Once the virtual environment is activated, you can import `mu_bench` from any directory on your system. The virtual environment only needs to be activated once per terminal session.
+
+### Step 3: Deploy Applications
+
+Deploy one of the pre-configured applications:
+
+```bash
+# Example: Deploy the IoT Gateway application
+python3 -c "
+import sys
+sys.path.append('.')
+from mu_bench.deployers.manager import K8sDeploymentManager
+
+manager = K8sDeploymentManager()
+manager.deploy_from_workmodel('APPS/app-iot-gateway/workmodel.json')
+"
+
+# Or use the deployment notebook
+jupyter notebook scripts/deploy_apps.ipynb
+```
+
+## Example Applications
+
+The project includes three pre-configured microservice applications:
+
+### 1. IoT Gateway System
+
+- **Services**: IoT Device Gateway, Edge Data Processor, Cloud Analytics Engine
+- **Topology**: Edge devices → Edge processing → Cloud analytics
+- **Use Case**: Real-time IoT data processing with cloud-based complex analytics
+
+### 2. Smart Manufacturing System
+
+- **Services**: Sensor ingestion, edge preprocessing, anomaly detection, predictive maintenance, production optimization
+- **Topology**: Multi-tier edge processing with cloud coordination
+- **Use Case**: Industrial IoT with real-time control and predictive analytics
+
+### 3. Smart City Traffic Management
+
+- **Services**: Traffic sensors, edge analytics, signal control, incident detection, central optimization
+- **Topology**: Distributed edge processing with centralized coordination
+- **Use Case**: Urban traffic management with real-time local control and city-wide optimization
+
+Each application includes:
+
+- `workmodel.json`: Service definitions, workloads, and dependencies
+- `k8parameters.json`: Kubernetes deployment parameters
+- Generated `yamls/`: Kubernetes manifests for deployment
 
 ## Running Experiments
 
-To run a basic experiment:
+### Quick Start with Example Apps
+
+Use the provided Jupyter notebooks for experiment execution:
 
 ```bash
-./scripts/run_experiment.sh
+# Deploy applications and run experiments
+jupyter notebook scripts/deploy_apps.ipynb
+
+# Run edge experiments with traffic generation
+jupyter notebook scripts/experiment.ipynb
+
+# Visualize results
+jupyter notebook scripts/visulize.ipynb
+```
+
+### Python API Usage
+
+```python
+import sys
+sys.path.append('.')
+
+from kubernetes import client, config
+from mu_bench.deployers.manager import K8sDeploymentManager
+
+# Load Kubernetes config
+config.load_kube_config()
+
+# Deploy an application
+manager = K8sDeploymentManager()
+manager.deploy_from_workmodel('APPS/app-iot-gateway/workmodel.json')
+
+# Run experiment with traffic generation
+# (See scripts/experiment.ipynb for complete examples)
 ```
 
 ## Core Components
 
 ### 1. Infrastructure Management (`/infrastructure`)
 
-- K3d Kubernetes cluster setup
-- Node volatility simulation (failures, throttling)
-- Resource constraints implementation
-- Monitoring Instalation
+- **K3d Cluster Setup**: Automated cluster creation with configurable node topology
+- **Node Management**: Resource limits, zone labeling, and affinity rules
+- **Monitoring Stack**: Prometheus, Grafana, and Kiali for metrics collection and visualization
+- **Chaos Engineering**: Optional Chaos Mesh integration for fault injection
 
-### 2. Application Management (`/APPS`)
+### 2. MuBench Framework (`/mu_bench`)
 
-- Application templates and deployment configurations
-- `workmodel.json` for describing microservice structure and placement
-- Service dependency definitions and resource requirements
-- Generated deployment yamls
+Modular Python library with the following components:
 
-### 3. MuBench Framework (`/mu_bench`)
+#### Generators
 
-- Workload emulation, request generation, and deployment automation
-- CLI tools, deployers, and experiment templates
-- **Note:** `/mu_bench/add_ons/` is deprecated and will be refactored in future releases
+- `service_graph_generator.py`: Creates service topologies using random or Barabasi-Albert models
+- `work_model_generator.py`: Generates complete workmodel configurations from service graphs
 
-## Application Lifecycle (CLI Usage)
+#### Deployers
 
-### 1. Scaffold a New Application
+- `manager.py`: Main deployment orchestration
+- `k8s_api/`: Direct Kubernetes API deployment with YAML generation
+- `yaml_based/`: Template-based deployment system
 
-To create a new application directory from the template (in `APPS/` by default):
+#### Request Generation
 
-```bash
-python3 -m mu_bench.cli.scaffold_app create -n <app_name>
-```
+- `edge_request_generator.py`: Traffic pattern simulation with temporal characteristics
+- `edge_profiles.py`: Configurable request profiles for different edge scenarios
+- `load_shape.py`: Load pattern definitions (constant, sinusoidal, spike patterns)
 
-- Use `--apps-dir <dir>` to specify a different parent directory.
-- Use `-e <example_workmodel.json>` to copy an example workmodel into your new app.
+#### Metrics & Visualization
 
-To list available example workmodels:
+- `visualization/`: Comprehensive metrics analysis system
+  - CPU/memory utilization analysis
+  - Pod-level and node-level metrics
+  - Istio service mesh latency analysis
+  - Zone correlation analysis
+  - Anomaly detection and performance ranking
 
-```bash
-python3 -m mu_bench.cli.scaffold_app list
-```
+#### Experiment Management
 
-### 2. Deploy an Application
+- `experiment_manager/`: Automated experiment execution with metrics collection
+- `metrics_exporter/`: Prometheus metrics export functionality
 
-To deploy an app (must contain a valid `workmodel.json`):
+### 3. Service Cell (`/service_cell`)
 
-```bash
-python3 -m mu_bench.cli.deploy_app --app-dir APPS/<app_name>
-```
+Containerized microservice implementation with:
 
-This will generate Kubernetes YAMLs in `APPS/<app_name>/yamls/` and apply them to your cluster.
+- CPU/memory stress simulation
+- Configurable service dependencies
+- REST API endpoints
+- Workload pattern execution
 
-### 3. Undeploy an Application
+## Experiment Workflow
 
-To undeploy an app and remove its resources from the cluster:
+1. **Setup Infrastructure**:
 
-```bash
-python3 -m mu_bench.cli.undeploy_app --app-dir APPS/<app_name>
-```
+   ```bash
+   ./infrastructure/setup.sh
+   ```
 
----
+2. **Deploy Application**:
 
-## Generators
+   ```python
+   from mu_bench.deployers.manager import K8sDeploymentManager
+   manager = K8sDeploymentManager()
+   manager.deploy_from_workmodel('APPS/app-iot-gateway/workmodel.json')
+   ```
 
-- `mu_bench/generators/service_graph_generator.py`: Generates service graphs (topologies) for microservice applications, supporting random and Barabasi models, with optional database nodes.
-- `mu_bench/generators/work_model_generator.py`: Generates work models (service definitions, resource configs, etc.) from a service graph and parameter set.
+3. **Run Experiment**:
+   Use `scripts/experiment.ipynb` for traffic generation and metrics collection
 
-These are used to automate the creation of realistic microservice topologies and configurations, which are then placed in your app's `generators/` or used to produce `workmodel.json`.
+4. **Analyze Results**:
 
----
+   ```python
+   from mu_bench.visualization import MetricsVisualizer
+   viz = MetricsVisualizer('DATA/experiment_001/metrics/')
+   viz.show_summary()
+   viz.plot_all()
+   ```
 
-## Deployers
+## Visualization and Analysis
 
-- The deployment logic is managed by `mu_bench/deployers/manager.py` and related files.
-- The CLI (`deploy_app.py`, `undeploy_app.py`) wraps this logic for user-friendly operation.
-- YAMLs are generated and applied automatically; advanced users can customize templates or parameters in `k8parameters.json`.
+The project includes a comprehensive visualization system for analyzing experimental results:
 
----
+### Available Analysis Types
 
-## Example Workflow
+- **Node-level**: CPU/memory usage, resource correlations, zone analysis
+- **Pod-level**: Individual service performance, namespace analysis
+- **Network**: Istio latency analysis, service mesh performance
+- **Advanced**: Anomaly detection, performance ranking, trend analysis
 
-```bash
-# 1. Scaffold a new app
-python3 -m mu_bench.cli.scaffold_app create -n myapp
-
-# 2. (Optional) Generate a service graph and workmodel using the generators
-#    (see mu_bench/generators/ for scripts and usage)
-
-# 3. Deploy the app
-python3 -m mu_bench.cli.deploy_app --app-dir APPS/myapp
-
-# 4. Undeploy the app
-python3 -m mu_bench.cli.undeploy_app --app-dir APPS/myapp
-```
-
----
-
-## Project Roadmap & Next Steps
-
-- Refactor for modular Python library structure and improved automation
-- Integrate node affinity and topology-aware deployment directly into deployment logic
-- Add Istio for ingress and advanced routing
-- Enable user location-aware routing and realistic cloud-edge placement experiments
-- Refactor or remove deprecated components (notably `mu_bench/add_ons/`)
-- Expand documentation and add more example applications and experiment templates
-
-## Final library form --> WIP
+### Usage Examples
 
 ```python
-        import mubench
+from mu_bench.visualization import MetricsVisualizer
 
-        # 1. Initialize an experiment directory (replaces manual APPS/app-edge creation)
-        exp_manager = mubench.ExperimentManager(base_dir="./my_experiments")
-        exp_run_path = exp_manager.new_run("experiment_001")
-        # This would create ./my_experiments/experiment_001 and potentially
-        # copy default template files for emulation.json, deployment.json, traffic.json etc.
+# Basic analysis
+viz = MetricsVisualizer('DATA/metrics/')
+viz.plot_cpu_analysis()
+viz.plot_memory_analysis()
 
-        # 2. Load or define models
-        emulation_model = mubench.models.load_emulation_model(f"{exp_run_path}/emulation.json")
-        deployment_model = mubench.models.load_deployment_model(f"{exp_run_path}/deployment.json")
-        # Or:
-        # emulation_model = mubench.generators.generate_complex_app(...)
-        # deployment_model = mubench.strategies.generate_edge_deployment(emulation_model)
+# Advanced analysis
+viz.plot_cpu_analysis_advanced()
+viz.plot_service_mesh_analysis()
 
-
-        # 3. Get a deployer instance (uses the new models)
-        kube_config_path = "~/.kube/config" # example
-        deployer = mubench.orchestration.KubernetesDeployer(
-            emulation_model=emulation_model,
-            deployment_model=deployment_model,
-            kube_config=kube_config_path
-        )
-
-        # 4. Deploy
-        deployer.deploy_services() # Generates YAMLs to exp_run_path/generated_yamls, then applies
-
-        # 5. Traffic Generation (example)
-        # traffic_config = mubench.load_traffic_config(f"{exp_run_path}/traffic.json")
-        # traffic_gen = mubench.generation.TrafficGenerator(emulation_model, deployer.get_service_endpoints())
-        # traffic_gen.start()
-
-        # 6. Metrics (example)
-        # metrics_collector = mubench.metrics.MetricsCollector(deployment_model, deployer.get_deployed_namespaces())
-        # metrics_collector.start(output_dir=f"{exp_run_path}/metrics")
-
-        # ... run experiment ...
-
-        # 7. Cleanup
-        # metrics_collector.stop()
-        # traffic_gen.stop()
-        # deployer.teardown_services()
+# Summary statistics
+viz.show_summary()
 ```
+
+## Configuration
+
+### Cluster Topology (`infrastructure/nodes.json`)
+
+```json
+[
+  {"zone": "cloud", "cpu_capacity": 4, "memory_capacity_gb": 8},
+  {"zone": "edge-site-1", "cpu_capacity": 2, "memory_capacity_gb": 4},
+  {"zone": "edge-site-2", "cpu_capacity": 2, "memory_capacity_gb": 4}
+]
+```
+
+### Application Definition (`workmodel.json`)
+
+Services with workloads, dependencies, and deployment configurations:
+
+- CPU/memory stress patterns
+- Service call probabilities
+- Node affinity rules
+- Autoscaling policies
+
+## Development and Extension
+
+### Adding New Applications
+
+1. Create directory in `/APPS/`
+2. Define `workmodel.json` with services and dependencies
+3. Configure `k8parameters.json` for deployment parameters
+4. Use deployment scripts to generate and apply Kubernetes manifests
+
+### Custom Workload Patterns
+
+Extend the service cell or create custom generators for specific workload characteristics.
+
+### Metrics Collection
+
+The system supports Prometheus metrics export and custom metric collection for specialized analysis.
+
+## Project Status
+
+✅ **Completed**:
+
+- Modular Python library structure
+- K3d-based infrastructure automation
+- Three example applications (IoT, Manufacturing, Smart City)
+- Comprehensive visualization and analysis system
+- Automated experiment execution framework
+
+🔄 **In Progress**:
+
+- Istio integration for advanced routing
+- User location-aware traffic patterns
+- Enhanced chaos engineering scenarios
+
+📋 **Planned**:
+
+- Additional application templates
+- Cloud migration simulation
+- Advanced fault injection patterns
+- Performance benchmarking suite

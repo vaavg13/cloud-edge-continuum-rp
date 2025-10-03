@@ -310,7 +310,7 @@ class K8sApiBuilder:
 
         return service
 
-    def _build_hpa_spec(self, service_name: str, autoscaling_config: Dict[str, Any]) -> client.V2HorizontalPodAutoscaler:
+    def _build_hpa_spec(self, service_name: str, autoscaling_config: Dict[str, Any]) -> client.V1HorizontalPodAutoscaler:
         """Build Horizontal Pod Autoscaler specification"""
         
         # Metrics configuration
@@ -327,14 +327,14 @@ class K8sApiBuilder:
             )
         ]
 
-        hpa = client.V2HorizontalPodAutoscaler(
+        hpa = client.V1HorizontalPodAutoscaler(
             api_version="autoscaling/v2",
             kind="HorizontalPodAutoscaler",
             metadata=client.V1ObjectMeta(
                 name=f"{service_name}-autoscaler",
                 namespace=self.namespace
             ),
-            spec=client.V2HorizontalPodAutoscalerSpec(
+            spec=client.V1HorizontalPodAutoscalerSpec(
                 scale_target_ref=client.V2CrossVersionObjectReference(
                     api_version="apps/v1",
                     kind="Deployment",
@@ -414,7 +414,7 @@ class K8sApiBuilder:
                 raise
             return None
 
-    def create_hpa(self, service_name: str, autoscaling_config: Dict[str, Any]) -> Optional[client.V2HorizontalPodAutoscaler]:
+    def create_hpa(self, service_name: str, autoscaling_config: Dict[str, Any]) -> Optional[client.V1HorizontalPodAutoscaler]:
         """Create a Horizontal Pod Autoscaler"""
         try:
             hpa = self._build_hpa_spec(service_name, autoscaling_config)

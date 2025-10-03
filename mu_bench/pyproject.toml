@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mu_bench"
+version = "0.1.0"
+description = "MuBench - Microservice Benchmark Framework for Cloud-Edge Continuum"
+requires-python = ">=3.8"
+dependencies = [
+    "kubernetes>=30.0.0",
+    "requests",
+    "pandas",
+    "matplotlib",
+    "seaborn",
+    "numpy",
+    "locust",
+    "gevent",
+    "pytz",
+    "python-dateutil",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+
