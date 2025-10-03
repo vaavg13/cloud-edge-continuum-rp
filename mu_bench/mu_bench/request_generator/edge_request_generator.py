@@ -164,6 +164,7 @@ class EdgeRequestGenerator:
         base_host = edge_config.get("base_host", "localhost")
         apps = edge_config.get("apps", [])
         edge_sites = edge_config.get("edge_sites", {})
+        endpoint = edge_config.get("endpoint", "s0")
         
         if not apps or not edge_sites:
             self.logger.warning("⚠️ No apps or edge sites defined")
@@ -190,7 +191,8 @@ class EdgeRequestGenerator:
                 base_host=base_host,
                 edge_sites=edge_sites,
                 app_weight=app_weight,
-                wait_time=between(wait_time_config["min"], wait_time_config["max"])
+                wait_time=between(wait_time_config["min"], wait_time_config["max"]),
+                endpoint=endpoint
             )
             
             self.user_classes.append(user_class)
@@ -203,7 +205,8 @@ class EdgeRequestGenerator:
         base_host: str,
         edge_sites: Dict[str, Any],
         app_weight: float,
-        wait_time
+        endpoint: str,
+        wait_time,
     ):
         """Create a dynamic user class for edge computing scenarios."""
         
@@ -216,7 +219,6 @@ class EdgeRequestGenerator:
             weight = int(app_weight * 10)  # Scale for Locust weights
             wait_time = captured_wait_time
             host = f"http://{base_host}:{app_port}"  # Set host at class level
-            
             def __init__(self, environment: Environment):
                 super().__init__(environment)
                 self.app_name = app_name
@@ -224,6 +226,7 @@ class EdgeRequestGenerator:
                 self.base_host = base_host
                 self.edge_sites = edge_sites
                 self.edge_calculator = edge_calculator
+                self.endpoint = endpoint
                 
                 # Reference to parent generator for logging
                 self.generator = None
@@ -267,8 +270,8 @@ class EdgeRequestGenerator:
                 weights = [site["weight"] for site in weighted_sites]
                 chosen_site = random.choices(population=sites, weights=weights, k=1)[0]
                 
-                # Make request to s0-{edge-site-id} endpoint
-                endpoint = f"/s0-{chosen_site}"
+                # Make request to endpoint-{edge-site-id} format
+                endpoint = f"/{self.endpoint}-{chosen_site}"
                 request_name = f"{self.app_port}:{endpoint}"
                 
                 start_time = time.time()
@@ -325,6 +328,7 @@ class EdgeRequestGenerator:
         base_host = edge_config.get("base_host", "localhost")
         apps = edge_config.get("apps", [])
         edge_sites = edge_config.get("edge_sites", {})
+        endpoint_prefix = edge_config.get("endpoint", "s0")
         
         tested_count = 0
         failed_endpoints = []
@@ -335,7 +339,7 @@ class EdgeRequestGenerator:
                 continue
                 
             for site_id in edge_sites.keys():
-                endpoint = f"http://{base_host}:{app_port}/s0-{site_id}"
+                endpoint = f"http://{base_host}:{app_port}/{endpoint_prefix}-{site_id}"
                 try:
                     response = requests.get(endpoint, timeout=5)
                     if response.status_code not in [200, 404]:  # 404 is OK for non-existent endpoints

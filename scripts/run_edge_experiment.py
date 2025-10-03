@@ -46,7 +46,8 @@ def get_edge_config():
                 "description": "Suburban site with steady traffic",
                 "traffic_weight": 0.8
             }
-        }
+        },
+        "endpoint": "s0"
     }
 
 
