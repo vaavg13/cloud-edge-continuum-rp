@@ -131,6 +131,9 @@ class K8sYamlBuilder:
         # Create deployment and service YAML files
         self.create_deployment_service_yaml_files(expanded_workmodel, nfs_conf, output_path)
         
+        # Create Istio ingress (Gateway + VirtualService) YAML files
+        self.create_istio_ingress_files(expanded_workmodel, output_path)
+        
         # Create workmodel configmap
         self.create_configmap_yaml_file(
             workmodel=expanded_workmodel,
@@ -159,6 +162,27 @@ class K8sYamlBuilder:
         # Create nginx gateway files
         if self.nginx_gw:
             self.create_nginx_gateway_files(output_path)
+
+    def create_istio_ingress_files(self, expanded_workmodel, output_path):
+        """Create Istio Gateway and VirtualService YAMLs covering all services."""
+        gateway_tmpl = self.env.get_template("IstioGatewayTemplate.yaml")
+        vs_tmpl = self.env.get_template("IstioVirtualServiceTemplate.yaml")
+
+        context = {
+            "namespace": self.namespace,
+            "gateway_name": "mub-gateway",
+            "vs_name": "mub-vs",
+            "services": list(expanded_workmodel.keys()),
+            "path": self.path,
+        }
+
+        gw_content = gateway_tmpl.render(**context)
+        vs_content = vs_tmpl.render(**context)
+
+        gw_output = f"{output_path}/yamls/{self.prefix_yaml_file}-IstioGateway.yaml"
+        vs_output = f"{output_path}/yamls/{self.prefix_yaml_file}-IstioVirtualService.yaml"
+        self._write_yaml(gw_output, gw_content)
+        self._write_yaml(vs_output, vs_content)
 
     def create_deployment_service_yaml_files(self, workmodel, nfs, output_path):
         for counter, (service, conf) in enumerate(workmodel.items(), 1):

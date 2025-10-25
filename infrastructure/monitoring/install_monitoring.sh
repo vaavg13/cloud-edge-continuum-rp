@@ -80,7 +80,8 @@ install_monitoring_stack() {
 
     kubectl label namespace default istio-injection=enabled --overwrite
 
-    apply_yaml "istio-prometheus-operator.yaml"
+    # Istio/Envoy scraping (simple PodMonitor) and app metrics
+    apply_yaml "istio-envoy-podmonitor.yaml"
 
     # --- Jaeger ---
     apply_yaml "jaeger.yaml"

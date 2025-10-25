@@ -15,6 +15,7 @@ class K8sYamlDeployer:
         self.k8s_apps_api = client.AppsV1Api()
         self.k8s_core_api = client.CoreV1Api()
         self.k8s_autoscaling_api = client.AutoscalingV2Api()
+        self.k8s_custom_api = client.CustomObjectsApi()
 
     def deploy(self, folder, sleep=0):
         for yaml_file in self._collect_yaml_files(folder):
@@ -81,6 +82,19 @@ class K8sYamlDeployer:
             if self._resource_exists(self.k8s_autoscaling_api.read_namespaced_horizontal_pod_autoscaler, name, namespace):
                 raise Exception(f"HorizontalPodAutoscaler '{name}' already exists in namespace '{namespace}'.")
             self.k8s_autoscaling_api.create_namespaced_horizontal_pod_autoscaler(namespace=namespace, body=resource)
+        elif kind in ("Gateway", "VirtualService"):
+            group = "networking.istio.io"
+            version = resource.get("apiVersion", "").split("/")[-1] or "v1alpha3"
+            plural = "gateways" if kind == "Gateway" else "virtualservices"
+            if self._custom_object_exists(group, version, plural, name, namespace):
+                raise Exception(f"{kind} '{name}' already exists in namespace '{namespace}'.")
+            self.k8s_custom_api.create_namespaced_custom_object(
+                group=group,
+                version=version,
+                namespace=namespace,
+                plural=plural,
+                body=resource,
+            )
 
     def _undeploy_resource(self, resource):
         kind = resource.get("kind")
@@ -95,10 +109,40 @@ class K8sYamlDeployer:
             self.k8s_core_api.delete_namespaced_config_map(name=name, namespace=namespace)
         elif kind == "HorizontalPodAutoscaler":
             self.k8s_autoscaling_api.delete_namespaced_horizontal_pod_autoscaler(name=name, namespace=namespace)
+        elif kind in ("Gateway", "VirtualService"):
+            group = "networking.istio.io"
+            version = resource.get("apiVersion", "").split("/")[-1] or "v1alpha3"
+            plural = "gateways" if kind == "Gateway" else "virtualservices"
+            try:
+                self.k8s_custom_api.delete_namespaced_custom_object(
+                    group=group,
+                    version=version,
+                    namespace=namespace,
+                    plural=plural,
+                    name=name,
+                )
+            except ApiException as e:
+                if e.status != 404:
+                    raise
 
     def _resource_exists(self, read_func, name, namespace):
         try:
             read_func(name=name, namespace=namespace)
+            return True
+        except ApiException as e:
+            if e.status == 404:
+                return False
+            raise
+
+    def _custom_object_exists(self, group, version, plural, name, namespace):
+        try:
+            self.k8s_custom_api.get_namespaced_custom_object(
+                group=group,
+                version=version,
+                namespace=namespace,
+                plural=plural,
+                name=name,
+            )
             return True
         except ApiException as e:
             if e.status == 404:

@@ -29,12 +29,12 @@ class K8sDeploymentManager:
         dns_resolver: str = "kube-dns.kube-system.svc.cluster.local",
         scheduler_name: str = "default-scheduler",
         sleep: int = 0,
-        nginx_gw: bool = True,
+        nginx_gw: bool = False,
         nginx_svc_type: str = "NodePort",
         no_apply: bool = False,
         output_dir: str = "SimulationWorkspace",
         nginx_node_port: int = 31114,
-        istio_injection: bool = False
+        istio_injection: bool = True
     ):
         self.workmodel = workmodel
         self.prefix_yaml_file = prefix_yaml_file

@@ -107,7 +107,6 @@ install_chaos_mesh() {
         --set chaosDaemon.runtime=containerd \
         --set chaosDaemon.socketPath=/run/k3s/containerd/containerd.sock \
         --set controllerManager.replicaCount=1 \
-        --set controllerManager.nodeSelector."node-role\.kubernetes\.io/control-plane"=true \
         --set controllerManager.tolerations[0].key=node-role.kubernetes.io/control-plane \
         --set controllerManager.tolerations[0].operator=Exists \
         --set controllerManager.tolerations[0].effect=NoSchedule
