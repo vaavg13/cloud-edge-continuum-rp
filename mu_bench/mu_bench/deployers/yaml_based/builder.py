@@ -1,6 +1,7 @@
 import os
 import yaml
 import json
+from typing import Optional
 from jinja2 import Environment, FileSystemLoader
 from copy import deepcopy
 from collections import defaultdict
@@ -73,7 +74,7 @@ class K8sYamlBuilder:
             resources.setdefault('limits', {})['memory'] = service_conf['memory-limits']
         return resources, rank_string
 
-    def _build_node_affinity(self, affinity_string: str | None):
+    def _build_node_affinity(self, affinity_string: Optional[str]):
         if not affinity_string or not isinstance(affinity_string, str):
             return None
         
